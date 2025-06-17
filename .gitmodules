@@ -1,0 +1,9 @@
+[submodule "experiencemaker"]
+	path = experiencemaker
+	url = git@gitlab.alibaba-inc.com:OpenRepo/ExperienceMaker.git
+[submodule "envservice"]
+	path = envservice
+	url = git@gitlab.alibaba-inc.com:EconML/EnvService.git
+[submodule "verl"]
+	path = verl
+	url = git@github.com:volcengine/verl.git
