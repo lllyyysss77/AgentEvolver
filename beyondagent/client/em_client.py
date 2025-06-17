@@ -1,24 +1,54 @@
+from typing import List
+
 from pydantic import Field
 
-from experiencemaker.schema.request import AgentWrapperRequest, ContextGeneratorRequest, SummarizerRequest
-from experiencemaker.schema.response import AgentWrapperResponse, ContextGeneratorResponse, SummarizerResponse
-from experiencemaker.utils.http_client import HttpClient
+from beyondagent.schema.trajectory import Trajectory
+from beyondagent.utils.http_client import HttpClient
 
 
 class EMClient(HttpClient):
-    base_url: str = Field(default=...)
+    base_url: str = Field(default="http://localhost:8001")
 
-    def call_agent_wrapper(self, request: AgentWrapperRequest):
-        self.url = self.base_url + "/agent_wrapper"
-        return AgentWrapperResponse(**self.request(json_data=request.model_dump(),
-                                                   headers={"Content-Type": "application/json"}))
-
-    def call_context_generator(self, request: ContextGeneratorRequest):
+    def call_context_generator(self, trajectory: Trajectory, retrieve_top_k: int = 1, workspace_id: str = "",
+                               **kwargs) -> str:
         self.url = self.base_url + "/context_generator"
-        return ContextGeneratorResponse(**self.request(json_data=request.model_dump(),
-                                                       headers={"Content-Type": "application/json"}))
+        json_data = {
+            "trajectory": trajectory.model_dump(),
+            "retrieve_top_k": retrieve_top_k,
+            "workspace_id": workspace_id,
+            "metadata": kwargs
+        }
+        response = self.request(json_data=json_data, headers={"Content-Type": "application/json"})
 
-    def call_summarizer(self, request: SummarizerRequest):
+        # TODO return raw experience instead of context @jinli
+        return response["context_msg"]["content"]
+
+    def call_summarizer(self, trajectories: List[Trajectory], workspace_id: str = "", **kwargs):
         self.url = self.base_url + "/summarizer"
-        return SummarizerResponse(**self.request(json_data=request.model_dump(),
-                                                 headers={"Content-Type": "application/json"}))
+        json_data = {
+            "trajectories": [x.model_dump() for x in trajectories],
+            "workspace_id": workspace_id,
+            "metadata": kwargs
+        }
+        response = self.request(json_data=json_data, headers={"Content-Type": "application/json"})
+        return response["experiences"]
+
+
+if __name__ == "__main__":
+    client = EMClient()
+    traj = Trajectory(
+        steps=[
+            {
+                "role": "user",
+                "content": "What is the capital of France?"
+            },
+            {
+                "role": "assistant",
+                "content": "Paris"
+            }
+        ],
+        query="What is the capital of France?"
+    )
+    workspace_id = "w_agent_enhanced"
+    print(client.call_context_generator(traj, retrieve_top_k=3, workspace_id=workspace_id))
+    print(client.call_summarizer(trajectories=[traj], workspace_id=workspace_id))

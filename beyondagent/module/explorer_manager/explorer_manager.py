@@ -4,22 +4,20 @@ from typing import List
 from typing import Literal
 
 from omegaconf import DictConfig
-from recipe.beyond_agent.env_aware_engine import EnvAwareEngine
 from verl import DataProto
 from verl.workers.rollout.async_server import AsyncLLMServerManager
 
-from .callback import simple_callback
-from .env_worker import EnvWorker
-from .schema import Experience
-from ..agent_flow.base_agent_flow import BaseAgentFlow
-from ..agent_flow.env_agent_flow import AgentFlow
-from ...schema.task import Task
-from ...schema.trajectory import Trajectory
+from beyondagent.module.agent_flow.base_agent_flow import BaseAgentFlow
+from beyondagent.module.agent_flow.env_agent_flow import AgentFlow
+from beyondagent.module.explorer_manager.env_worker import EnvWorker
+from beyondagent.schema.trajectory import Trajectory
 
 
 class BaseParallelEnvManager(object):
     def __init__(self, config: DictConfig, async_rollout_manager: AsyncLLMServerManager, max_parallel: int = 128,
                  **kwargs):
+        super().__init__(**kwargs)
+
         self.config: DictConfig = config
         self.async_rollout_manager: AsyncLLMServerManager = async_rollout_manager
         self.max_parallel: int = max_parallel
@@ -52,7 +50,7 @@ class BaseParallelEnvManager(object):
         return llm_chat
 
     def rollout_env_worker(self, task: Task, data_id: str, rollout_id: str, mode: Literal["sample", "validate"],
-                           thread_index: int, **kwargs) -> Experience:
+                           thread_index: int, **kwargs) -> Trajectory:
         """
         Process a single prompt in a thread-safe way.
         """

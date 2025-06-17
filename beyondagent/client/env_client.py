@@ -1,7 +1,7 @@
 # env_client.py
+from typing import Dict, List, Any
+
 import requests
-from typing import Dict, List, Optional, Any
-import json
 
 
 class EnvClient:
@@ -37,7 +37,7 @@ class EnvClient:
         self, env_type: str, split: str = "train", params: dict | None = None
     ) -> List[str]:
         """获取任务ID列表"""
-        payload = {"env_type": env_type}
+        payload: dict = {"env_type": env_type}
         if params:
             payload["params"] = params
         response = self._make_request(

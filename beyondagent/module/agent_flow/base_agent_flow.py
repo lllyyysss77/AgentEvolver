@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict
+from typing import Any, Callable
 
 from beyondagent.client.env_client import EnvClient
 from beyondagent.schema.trajectory import Trajectory
@@ -14,6 +14,7 @@ class BaseAgentFlow(object):
                  max_env_len: int = 1024,
                  **kwargs):
         super.__init__(**kwargs)
+
         self.llm_chat_fn: Callable = llm_chat_fn
         self.tokenizer = tokenizer
         self.max_steps: int = max_steps
