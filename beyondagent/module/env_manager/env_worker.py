@@ -19,8 +19,7 @@ class EnvWorker(object):
 
     def execute(self, data_id: str, rollout_id: str, agent_flow: BaseAgentFlow, **kwargs) -> Trajectory:
         
-        # try:
-        if True:
+        try:
             init_response = self.env.create_instance(env_type=self.env_type,
                                                     task_id=self.task_id,
                                                     instance_id=self.instance_id)
@@ -33,12 +32,12 @@ class EnvWorker(object):
 
             self.env.release_instance(self.instance_id)
         
-        # except Exception as e:
-        #     print("Error in EnvWorker: ", e)
-        #     trajectory = Trajectory(data_id=data_id, rollout_id=rollout_id, steps=[], query="")
-        #     try:
-        #         self.env.release_instance(self.instance_id)
-        #     except Exception as e:
-        #         print(f"Env instance has been released: {self.instance_id}; Error: {e}")
+        except Exception as e:
+            print("Error in EnvWorker: ", e)
+            trajectory = Trajectory(data_id=data_id, rollout_id=rollout_id, steps=[], query="")
+            try:
+                self.env.release_instance(self.instance_id)
+            except Exception as e:
+                print(f"Env instance has been released: {self.instance_id}; Error: {e}")
 
         return trajectory
