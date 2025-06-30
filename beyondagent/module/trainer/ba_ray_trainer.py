@@ -322,7 +322,7 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
         sample_outputs = []
         sample_scores = []
 
-        for test_data in self.val_dataloader:
+        for i, test_data in enumerate(self.val_dataloader):
             test_batch = DataProto.from_single_dict(test_data)
 
             # repeat test batch
@@ -370,7 +370,7 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                             env_type=self.config.env_service.env_type
                          ) for i in range(len(test_gen_batch))]
                 print("=" * 10 + "start validate rollout" + "=" * 10)
-                trajectories = self.env_manager.rollout(tasks, mode="validate")
+                trajectories = self.env_manager.rollout(tasks, mode="validate", epoch=f"test.1.{i}")
                 print("=" * 10 + "end validate rollout" + "=" * 10)
                 test_output_gen_batch = self.env_manager.to_dataproto(trajectories)
                 # test_output_gen_batch_padded = self.explorer_manager.rollout(test_gen_batch_padded)
@@ -487,7 +487,7 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
         last_val_metrics = None
 
         for epoch in range(self.config.trainer.total_epochs):
-            for batch_dict in self.train_dataloader:
+            for i, batch_dict in enumerate(self.train_dataloader):
                 metrics = {}
                 timing_raw = {}
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
@@ -527,7 +527,7 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
 
                             # TODO enable tracing by jinli 0619
                             print("=" * 10 + "start fit rollout" + "=" * 10)
-                            trajectories = self.env_manager.rollout(tasks, mode="sample")
+                            trajectories = self.env_manager.rollout(tasks, mode="sample", epoch=f"train.{epoch}.{i}")
                             print("=" * 10 + "end fit rollout" + "=" * 10)
 
                             gen_batch_output = self.env_manager.to_dataproto(trajectories)

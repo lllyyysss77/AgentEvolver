@@ -103,7 +103,7 @@ class ParallelEnvManager(object):
 
         return trajectory
 
-    def rollout(self, tasks: List[Task], mode: Literal["sample", "validate"]) -> List[Trajectory]:
+    def rollout(self, tasks: List[Task], mode: Literal["sample", "validate"], epoch: str) -> List[Trajectory]:
         trajectory_list: List[Trajectory] = []
         rollout_n = 1 if mode=="validate" else self.rollout_n
         with ThreadPoolExecutor(max_workers=self.max_parallel) as executor:
@@ -115,7 +115,7 @@ class ParallelEnvManager(object):
                                              rollout_id=str(rollout_id), mode=mode, thread_index=thread_index)
                     futures.append(future)
 
-            for future in tqdm(futures, desc="collect rollout result"):
+            for future in tqdm(futures, desc=f"epoch{epoch}.collect_rollout"):
                 # do not fail silently
                 result = future.result()
                 trajectory_list.append(result)
