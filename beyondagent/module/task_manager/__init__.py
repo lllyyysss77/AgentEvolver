@@ -5,20 +5,21 @@ import copy
 import json
 import os
 import time
-from typing import Callable, Optional, Sequence, TypedDict, Unpack
+from typing import Callable, Iterable, Optional, Sequence, TypedDict, Unpack
 
 import hydra
 from loguru import logger
 from omegaconf import DictConfig
+from torch.utils.data import IterableDataset
 from beyondagent.client.llm_client import DashScopeClient
 from beyondagent.module.agent_flow.agent_flow import AgentFlow
 from beyondagent.module.agent_flow.base_agent_flow import BaseAgentFlow
+from beyondagent.module.task_manager.adapter import OnflyRlDataset, to_rl_dataset
 from beyondagent.module.task_manager.env_worker import EnvWorker
 from beyondagent.module.task_manager.prompt_explore import AGENT_INTERACTION_SYSTEM_PROMPT
-from beyondagent.module.task_manager.prompt_summarize import AGENT_SUMMARIZE_SYSTEM_PROMPT, get_task_summarize_prompt, parse_tasks_from_response
+from beyondagent.module.task_manager.prompt_summarize import get_task_summarize_prompt, parse_tasks_from_response
 from beyondagent.module.task_manager.protocols import LlmClient
-from beyondagent.module.task_manager.schema import TaskObjective
-from beyondagent.schema.task import Task
+from beyondagent.schema.task import Task, TaskObjective
 from beyondagent.schema.trajectory import Trajectory
 
 
@@ -42,23 +43,61 @@ class TaskManager(object):
         self._tokenizer = tokenizer # TODO: 这玩意似乎不该在这
     
     def generate_task(self,tasks:Sequence[Task])->list[TaskObjective]:
-        # TODO: 应当按照不同的任务划分队列，使得后一次对同任务的探索能够避开已经探索的任务
         task_q=list(copy.copy(tasks))*self._n
         res=[]
         # 每次最多探索所有不同任务，或者最大线程个任务
         parallel_num=min(self._num_exploration_threads,len(tasks))
         for i in range(0,len(task_q),parallel_num):
             trajectories=self._step_explore_batch(task_q[i:i+parallel_num])
-            
-            # FIXME: for debug, save all trajectories in readable format
-            with open("debug-trajectories.json","a") as f:
-                json.dump([x.dict() for x in trajectories],f,indent=2,ensure_ascii=False)
-            
             task_objectives=self._step_summarize_batch(task_q[i:i+parallel_num],trajectories)
             res.extend(task_objectives)
             # TODO: 把已经有的 task 加入 experience，阻止再次探索重复任务
         
         return res
+    
+    def get_dataset(self,tasks:Iterable[Task],bs:int,tokenizer,config):
+        """
+        Get dataset.
+        
+        Args:
+            tasks: Iterable[Task]
+            bs: int. 该 batch size 决定一次读取的 task 数量。每次生成的 dataset 大小为 bs * self._n。
+            tokenizer: transformers.tokenization_utils.PreTrainedTokenizer
+            config: DictConfig
+        """
+        fa=self
+        # wrapper for data auto-reloading
+        class AutoReloadDataset(IterableDataset):
+            def __init__(self,bs:int):
+                self._bs=bs
+                
+                self._dataset=OnflyRlDataset(release_used_dataset=True)
+            
+            def reload(self):
+                delta=[]
+                for task in tasks:
+                    delta.append(task)
+                    if len(delta)==self._bs:
+                        break
+                
+                ls=fa.generate_task(delta)
+                self._dataset.append_dataset(to_rl_dataset(ls,tokenizer,config))
+                return self._dataset.num_rest_data
+                
+            
+            def __iter__(self):
+                return self
+            
+            def __next__(self):
+                print("try get next data: ", self._dataset.num_rest_data)
+                if self._dataset.num_rest_data==0:
+                    print("no data left, reloading")
+                    if self.reload()==0:
+                        print("no task left, stop iteration")
+                        raise StopIteration
+                return next(self._dataset)
+        
+        return AutoReloadDataset(bs)
     
     def _step_explore_batch(self,tasks:Sequence[Task]):
         with ThreadPoolExecutor(max_workers=self._num_exploration_threads) as executor:
@@ -152,13 +191,18 @@ class TaskManager(object):
 def test(config):
     import transformers
     import json
+    from torch.utils.data import DataLoader
     tokenizer=transformers.AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct", trust_remote_code=True)
-    manager=TaskManager(config,DashScopeClient(),tokenizer=tokenizer,env_service_url="http://localhost:8000",max_explore_step=10,max_llm_retries=3,num_explore_threads=2,n=3)
+    manager=TaskManager(config,DashScopeClient(),tokenizer=tokenizer,env_service_url="http://localhost:8000",max_explore_step=3,max_llm_retries=3,num_explore_threads=2,n=2)
     task=Task(task_id="0a9d82a_1",env_type="appworld")
-    res=manager.generate_task([task])
-    with open("debug-taskobjectives.json","w") as f:
-        json.dump([x.dict() for x in res],f,indent=2,ensure_ascii=False)
-    import pdb;pdb.set_trace()
+    tasks=[task]*100
+    dataset=manager.get_dataset(iter(tasks),bs=1,tokenizer=tokenizer,config=config)
+    dataloader=DataLoader(dataset,batch_size=2,shuffle=False)
+
+    print("ready to retrieve data")
+    for data in dataloader:
+        import pdb;pdb.set_trace()
+    
 
 if __name__=="__main__":
     test()
