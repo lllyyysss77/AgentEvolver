@@ -81,6 +81,11 @@ class TaskManager(object):
                         break
                 
                 ls=fa.generate_task(delta)
+                # TODO: 应当以 task 数量判断，还是 task*n？
+                while len(ls)<self._bs:
+                    logger.debug("failed to generate enough tasks, retrying")
+                    ls=fa.generate_task(delta)
+                
                 self._dataset.append_dataset(to_rl_dataset(ls,tokenizer,config))
                 return self._dataset.num_rest_data
                 
@@ -186,18 +191,21 @@ class TaskManager(object):
         return llm_chat
 
 
+# TODO(cc): task manager 的多线程和数据集多线程有冲突似乎
 
 @hydra.main(config_path="/Users/cc/projects/BeyondAgent/config", config_name="beyond_agent_dataflow", version_base=None)
 def test(config):
     import transformers
     import json
     from torch.utils.data import DataLoader
+    from verl.utils.dataset.rl_dataset import collate_fn as default_collate_fn
+    
     tokenizer=transformers.AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct", trust_remote_code=True)
     manager=TaskManager(config,DashScopeClient(),tokenizer=tokenizer,env_service_url="http://localhost:8000",max_explore_step=3,max_llm_retries=3,num_explore_threads=2,n=2)
     task=Task(task_id="0a9d82a_1",env_type="appworld")
     tasks=[task]*100
     dataset=manager.get_dataset(iter(tasks),bs=1,tokenizer=tokenizer,config=config)
-    dataloader=DataLoader(dataset,batch_size=2,shuffle=False)
+    dataloader=DataLoader(dataset,batch_size=2,shuffle=False,collate_fn=default_collate_fn)
 
     print("ready to retrieve data")
     for data in dataloader:
