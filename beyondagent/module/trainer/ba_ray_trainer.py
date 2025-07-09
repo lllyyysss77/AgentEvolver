@@ -33,6 +33,7 @@ from omegaconf import OmegaConf, open_dict
 from tqdm import tqdm
 from torch.utils.data import SequentialSampler,IterableDataset
 from torchdata.stateful_dataloader import StatefulDataLoader
+from beyondagent.module.task_manager.task_manager import AutoReloadDataset, FullDataset
 from verl import DataProto
 from verl.single_controller.ray import RayClassWithInitArgs, create_colocated_worker_cls
 from verl.trainer.ppo.core_algos import agg_loss
@@ -223,19 +224,9 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
             num_explore_threads=self.config.task_manager.num_explore_threads,
             n=self.config.task_manager.n,
         )
-        if self.config.task_manager.persistent_filepath is None:
-            # if no persistent file, we just use the on-the-fly dataset.
-            # training data is freshly generated every time.
-            logger.info("use on-the-fly task manager")
-            train_dataset=self.task_manager.get_dataset(tasks=self._train_tasks,bs=self.config.task_manager.bs,tokenizer=self.tokenizer,config=self.config.data)
-            train_sampler=self._train_sampler
-        else:
-            # or we just generate data once and always use it
-            logger.info("use persistent task manager")
-            train_dataset=self.task_manager.load_persistent_dataset(tasks=self._train_tasks,filepath=self.config.task_manager.persistent_filepath,tokenizer=self.tokenizer,config=self.config.data,processor=self.processor)
-            train_sampler=None
+        train_dataset=self.task_manager.get_or_load_full_dataset(tasks=self._train_tasks,filepath=self.config.task_manager.persistent_filepath,tokenizer=self.tokenizer,config=self.config.data,processor=self.processor)
+        train_sampler=self._train_sampler
         # reinit dataloader to use the new dataset
-        # sampler must be None
         self._create_dataloader(train_dataset,self.val_dataset,self._collate_fn,train_sampler)
     
     
@@ -259,17 +250,16 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
             from verl.utils.dataset.rl_dataset import collate_fn as default_collate_fn
 
             collate_fn = default_collate_fn
-
+            
+        assert not isinstance(self.train_dataset,AutoReloadDataset), "disable multiple workers for AutoReloadDataset"
         self.train_dataloader = StatefulDataLoader(
             dataset=self.train_dataset,
             batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size),
-            num_workers=1, # important
+            num_workers=self.config.data.get("dataloader_num_workers", 8),
             drop_last=True,
             collate_fn=collate_fn,
             sampler=train_sampler,
         )
-        
-        assert self.train_dataloader.num_workers==1,"dataloader num_workers must be 1 for task manager's on-the-fly data generation"
 
         val_batch_size = self.config.data.val_batch_size  # Prefer config value if set
         if val_batch_size is None:
@@ -881,3 +871,7 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                     pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
                     return
+            
+            if isinstance(self.train_dataset, FullDataset):
+                pprint("Reloading train dataset...")
+                self.train_dataset.reload()
