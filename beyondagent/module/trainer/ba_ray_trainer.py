@@ -744,8 +744,8 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                             config=self.config.algorithm,
                         )
                         # breakpoint()
-                        rho  = self.config.entropy_mask.rho        # 例如 0.2
-                        mode = self.config.entropy_mask.mode       # "pos-high-neg-high" / "pos-high-neg-low" / None
+                        rho  = self.config.actor_rollout_ref.actor.entropy_mask.rho       # 例如 0.2
+                        mode = self.config.actor_rollout_ref.actor.entropy_mask.mode       # "pos-high-neg-high" / "pos-high-neg-low" / None
 
                         entropy_mask, tau, (ent_pos, ent_neg) = self._add_entropy_mask(
                             entropy       = batch.batch["entropys"],          # (bs, resp_len)
