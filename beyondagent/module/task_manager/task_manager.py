@@ -112,8 +112,8 @@ class TaskManager(object):
         logger.info(f"loaded tasks from dataset, #tasks={len(self._tasks)}")
     
     def load_tasks_from_environment(self, env: EnvClient, *, env_type: str, split: str, params: Optional[dict] = None):        
-        response = env.get_task_ids(env_type, split, params)
-        self._tasks.extend([Task(task_id=x,env_type=env_type,evaluator='env') for x in response])
+        response = env.get_env_profile(env_type, split, params)
+        self._tasks.extend([Task(task_id=str(x),env_type=env_type,evaluator='env') for x in response])
         assert all([x.query is None for x in self._tasks]), "query of seed task must be empty"
         logger.info(f"loaded tasks from environment, #tasks={len(self._tasks)}")
 

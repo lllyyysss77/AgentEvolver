@@ -48,7 +48,7 @@ def to_rl_dataset(
             "uuid": str(uuid.uuid4()),
             "extras": {
                 "task_id": task.task_id,
-                "new_prompt": task.query,
+                "new_query": task.query,
                 "synthetic": task_obj.ground_truth!='[env]' # TODO: this is a temporary solution
             },
         }

@@ -30,13 +30,15 @@ class EnvWorker(object):
             logger.exception(f"encounter exception in env_worker.create_instance~ error={e.args}")
             return trajectory
         
-        # replace query if new query is in task
-        if self.task.query is not None:
-            assert init_response["state"][-1]["role"] == "user", "the latest message from environment must be user query"
-            init_response["state"][-1]["content"] = self.task.query
+        
 
         try:
             state_message: list[dict] = init_response["state"]
+            assert isinstance(state_message,list), "state_message must be list"
+            # replace query if new query is in task
+            if self.task.query is not None:
+                assert state_message[-1]["role"] == "user", "the latest message from environment must be user query"
+                state_message[-1]["content"] = self.task.query
             trajectory: Trajectory = Trajectory(data_id=data_id,
                                                 rollout_id=rollout_id,
                                                 steps=state_message,
