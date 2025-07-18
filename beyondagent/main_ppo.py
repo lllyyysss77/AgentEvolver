@@ -207,7 +207,6 @@ class TaskRunner:
             env_service_url=config.env_service.env_url,
             num_explore_threads=config.task_manager.num_explore_threads,
             n=config.task_manager.n,
-            mix_original_tasks=config.task_manager.mix_original_tasks
         )
         val_task_manager=TaskManager(
             config=config,
@@ -219,7 +218,6 @@ class TaskRunner:
             env_service_url=config.env_service.env_url,
             num_explore_threads=config.task_manager.num_explore_threads,
             n=config.task_manager.n,
-            mix_original_tasks=config.task_manager.mix_original_tasks
         )
         trainer = BeyondAgentRayPPOTrainer(
             config=config,

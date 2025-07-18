@@ -44,13 +44,6 @@ from verl.utils.dataset.rl_dataset import RLHFDataset
 class TaskManagerProps(TypedDict):
     num_explore_threads: int
     n: int # 重复探索的控制必须放在这里，task manager 要规划 task 执行顺序，避免在同时探索相同任务导致潜在的 query 重复
-    
-    exploration_llm_temperature: NotRequired[float]
-    exploration_llm_top_p: NotRequired[float]
-    exploration_llm_top_k: NotRequired[int]
-    
-    mix_original_tasks: NotRequired[bool]
-
 
 # TODO: 能够替换的 exploration & extraction (summary) strategy
 
