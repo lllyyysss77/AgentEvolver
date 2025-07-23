@@ -71,7 +71,7 @@ task_manager:
 
 ## 测试 Script
 
-请先启动 EnvService，然后执行以下脚本
+请先启动 EnvService（[add_live_span_and_dynamic_load](https://code.alibaba-inc.com/EconML/EnvService/tree/add_live_span_and_dynamic_load/) branch），然后执行以下脚本
 
 ```
 #!/bin/bash
