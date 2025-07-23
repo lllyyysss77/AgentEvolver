@@ -304,6 +304,12 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
     def _create_dataloader_from_manager(self, collate_fn, shuffle_trainset: bool = True):
         """
         Creates the train and validation dataloaders.
+        
+        1. Check the existence of train and val files and load local tasks from them. If no files given, load tasks from environment (train and val/dev splits).
+        2. Use task manager to generate synthetic tasks for trainset, and load the original val dataset.
+        3. Use task manager to mix tasks from different sources.
+        4. Adapt datasets and create dataloaders used in the trainer.
+        
         """
         # TODO: we have to make sure the batch size is divisible by the dp size
         if collate_fn is None:
