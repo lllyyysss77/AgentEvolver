@@ -46,13 +46,14 @@ task_manager:
   train_data_path: tasks_explored.train.json # tasks will be explored once if set. use it if you want to keep the same explorations.
   val_data_path: tasks_explored.val.json # tasks will be explored once if set. use it if you want to keep the same explorations.
   llm_client: qwen-plus # policy, or other llm name provided in DashScopeClient
-  n: 10
+  # 0 - stop exploration
+  n: 0
   bs: ${data.train_batch_size} # this should be the same as train_batch_size
   num_explore_threads: ${thread_pool.max_workers}
 
   mixture:
     use_original_tasks: True
-    synthetic_data_ratio: 1000.0
+    synthetic_data_ratio: 0.0
     shuffle: True
 
   strategy: random
