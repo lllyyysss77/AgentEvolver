@@ -18,36 +18,49 @@ FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
 
+import os
 import uuid
 from collections import defaultdict
 from concurrent.futures.thread import ThreadPoolExecutor
 from copy import deepcopy
 from pprint import pprint
-from typing import List
+from typing import List, Optional
 
+from loguru import logger
 import numpy as np
 import ray
 import torch
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, open_dict
 from tqdm import tqdm
+from torch.utils.data import SequentialSampler,IterableDataset,Dataset,Sampler
+from torchdata.stateful_dataloader import StatefulDataLoader
+from beyondagent.client.env_client import EnvClient
+from beyondagent.module.task_manager.task_manager import AutoReloadDataset, FullDataset
 from verl import DataProto
 from verl.single_controller.ray import RayClassWithInitArgs, create_colocated_worker_cls
+from verl.single_controller.ray.base import RayWorkerGroup
+from verl.trainer.ppo import core_algos
 from verl.trainer.ppo.core_algos import agg_loss
 from verl.trainer.ppo.metric_utils import (compute_data_metrics,
                                            compute_throughout_metrics,
                                            compute_timing_metrics,
                                            process_validation_metrics)
-from verl.trainer.ppo.ray_trainer import (AdvantageEstimator, RayPPOTrainer,
+from verl.trainer.ppo.ray_trainer import (AdvantageEstimator, RayPPOTrainer, ResourcePoolManager, WorkerType,
                                           _timer, apply_kl_penalty,
                                           compute_advantage,
                                           compute_response_mask, Role)
 from verl.trainer.ppo.reward import compute_reward, compute_reward_async
+from verl.utils.dataset.rl_dataset import RLHFDataset
 from verl.utils.metric import reduce_metrics
 
+from beyondagent.client.llm_client import DashScopeClient
 from beyondagent.client.em_client import EMClient
 from beyondagent.module.env_manager.env_manager import ParallelEnvManager
+from beyondagent.module.task_manager import adapter as task_adapter
+from beyondagent.module.task_manager import TaskManager,NaiveTaskObjectiveRetrieval
 from beyondagent.schema.task import Task
 from beyondagent.schema.trajectory import Trajectory
+from verl.utils.tracking import ValidationGenerationsLogger
 
 
 def parse_reward_from_dataproto(data: DataProto, return_dict=False) -> dict | torch.Tensor:
@@ -90,15 +103,110 @@ def parse_reward_from_dataproto(data: DataProto, return_dict=False) -> dict | to
     else:
         return reward_tensor
 
+
+def create_rl_sampler(data_config, dataset):
+    """Create a sampler for the dataset.
+
+    Arguments:
+        data_config: The data config.
+        dataset (Dataset): The dataset.
+
+    Returns:
+        sampler (Sampler): The sampler.
+    """
+    import torch
+    from torch.utils.data import RandomSampler, SequentialSampler
+
+    # use sampler for better ckpt resume
+    if data_config.shuffle:
+        train_dataloader_generator = torch.Generator()
+        train_dataloader_generator.manual_seed(data_config.get("seed", 1))
+        sampler = RandomSampler(data_source=dataset, generator=train_dataloader_generator)
+    else:
+        sampler = SequentialSampler(data_source=dataset)
+
+    return sampler
+
+
+
 class BeyondAgentRayPPOTrainer(RayPPOTrainer):
     """
     Note that this trainer runs on the driver process on a single CPU/GPU node.
     """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    
+    def __init__(
+        self,
+        config,
+        tokenizer,
+        role_worker_mapping: dict[Role, WorkerType],
+        resource_pool_manager: ResourcePoolManager,
+        train_task_manager:TaskManager,
+        val_task_manager:TaskManager,
+        ray_worker_group_cls: RayWorkerGroup = RayWorkerGroup, # type: ignore
+        processor=None,
+        reward_fn=None,
+        val_reward_fn=None,
+        collate_fn=None,
+        shuffle_trainset:bool=False,
+        device_name="cuda",
+    ):
+        """Initialize distributed PPO trainer with Ray backend."""
+
+        self.tokenizer = tokenizer
+        self.processor = processor
+        self.config = config
+        self.reward_fn = reward_fn
+        self.val_reward_fn = val_reward_fn
+
+        self.hybrid_engine = config.actor_rollout_ref.hybrid_engine
+        assert self.hybrid_engine, "Currently, only support hybrid engine"
+
+        if self.hybrid_engine:
+            assert Role.ActorRollout in role_worker_mapping, f"{role_worker_mapping.keys()=}"
+
+        self.role_worker_mapping = role_worker_mapping
+        self.resource_pool_manager = resource_pool_manager
+        self.use_reference_policy = Role.RefPolicy in role_worker_mapping
+        self.use_rm = Role.RewardModel in role_worker_mapping
+        self.ray_worker_group_cls = ray_worker_group_cls
+        self.device_name = device_name
+        self.validation_generations_logger = ValidationGenerationsLogger()
+
+        # if ref_in_actor is True, the reference policy will be actor without lora applied
+        self.ref_in_actor = config.actor_rollout_ref.model.get("lora_rank", 0) > 0
+
+        # define in-reward KL control
+        # kl loss control currently not suppoorted
+        if config.algorithm.use_kl_in_reward:
+            self.kl_ctrl_in_reward = core_algos.get_kl_controller(config.algorithm.kl_ctrl)
+
+        if self.config.algorithm.adv_estimator == AdvantageEstimator.GAE:
+            self.use_critic = True
+        elif self.config.algorithm.adv_estimator in [
+            AdvantageEstimator.GRPO,
+            AdvantageEstimator.GRPO_PASSK,
+            AdvantageEstimator.REINFORCE_PLUS_PLUS,
+            AdvantageEstimator.REMAX,
+            AdvantageEstimator.RLOO,
+            AdvantageEstimator.OPO,
+            AdvantageEstimator.REINFORCE_PLUS_PLUS_BASELINE,
+        ]:
+            self.use_critic = False
+        else:
+            raise NotImplementedError
+
+        self._validate_config()
+        
         self.em_client: EMClient | None = None
         self.env_manager: ParallelEnvManager | None = None
         self.thread_pool: ThreadPoolExecutor | None = None
+
+        self.train_task_manager=train_task_manager
+        self.val_task_manager=val_task_manager
+        self._collate_fn=collate_fn
+        
+        self._create_dataloader_from_manager(collate_fn, shuffle_trainset)
+        
 
     def init_workers(self):
         """Initialize distributed training workers using Ray backend.
@@ -191,6 +299,101 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
         self.em_client = EMClient(base_url=self.config.experience_maker.base_url)
         self.env_manager = ParallelEnvManager(config=self.config, async_rollout_manager=self.async_rollout_manager, max_parallel=self.config.actor_rollout_ref.rollout.max_env_worker)
         self.thread_pool = ThreadPoolExecutor(max_workers=self.config.thread_pool.max_workers)
+    
+    
+    def _create_dataloader_from_manager(self, collate_fn, shuffle_trainset: bool = True):
+        """
+        Creates the train and validation dataloaders.
+        
+        1. Check the existence of train and val files and load local tasks from them. If no files given, load tasks from environment (train and val/dev splits).
+        2. Use task manager to generate synthetic tasks for trainset, and load the original val dataset.
+        3. Use task manager to mix tasks from different sources.
+        4. Adapt datasets and create dataloaders used in the trainer.
+        
+        """
+        # TODO: we have to make sure the batch size is divisible by the dp size
+        if collate_fn is None:
+            from verl.utils.dataset.rl_dataset import collate_fn as default_collate_fn
+
+            collate_fn = default_collate_fn
+        
+        
+        from verl.trainer.main_ppo import create_rl_dataset
+        # load train dataset from files or environment
+        env_client=EnvClient(self.config.env_service.env_url)
+        if self.config.data.train_files is not None:
+            train_seed_dataset = create_rl_dataset(self.config.data.train_files, self.config.data, self.tokenizer, self.processor)
+            assert isinstance(train_seed_dataset,RLHFDataset), "train_dataset must be RLHFDataset"
+            self.train_task_manager.load_tasks_from_dataset(train_seed_dataset,env_type=self.config.env_service.env_type)
+        else:
+            self.train_task_manager.load_tasks_from_environment(env_client,env_type=self.config.env_service.env_type,split="train")
+        # load val dataset
+        if self.config.data.val_files is not None:
+            val_seed_dataset = create_rl_dataset(self.config.data.val_files, self.config.data, self.tokenizer, self.processor)
+            assert isinstance(val_seed_dataset,RLHFDataset), "train_dataset must be RLHFDataset"
+            self.val_task_manager.load_tasks_from_dataset(val_seed_dataset,env_type=self.config.env_service.env_type)
+        else:
+            for split in ['val','dev']:
+                if self.val_task_manager.load_tasks_from_environment(env_client,env_type=self.config.env_service.env_type,split=split)>0:
+                    break
+        
+        self.train_dataset=self.train_task_manager.get_or_load_full_dataset(filepath=self.config.task_manager.train_data_path,tokenizer=self.tokenizer,config=self.config.data,processor=self.processor)
+        # although limiting dataset to only the original is possibile with strategy, we want to avoid the rollout process on val data.
+        self.val_dataset=self.val_task_manager.get_original_dataset(tokenizer=self.tokenizer,config=self.config.data,processor=self.processor)
+        
+        assert not isinstance(self.train_dataset,AutoReloadDataset), "please disable multiple workers for AutoReloadDataset"
+        assert not isinstance(self.val_dataset,AutoReloadDataset), "please disable multiple workers for AutoReloadDataset"
+        self.train_dataloader = StatefulDataLoader(
+            dataset=self.train_dataset,
+            batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size),
+            num_workers=self.config.data.get("dataloader_num_workers", 8),
+            drop_last=True,
+            collate_fn=collate_fn,
+            sampler=create_rl_sampler(self.config.data,self.train_dataset),
+        )
+
+        val_batch_size = self.config.data.val_batch_size  # Prefer config value if set
+        if val_batch_size is None:
+            val_batch_size = len(self.val_dataset) # type: ignore
+
+        self.val_dataloader = StatefulDataLoader(
+            dataset=self.val_dataset,
+            batch_size=val_batch_size,
+            num_workers=self.config.data.get("dataloader_num_workers", 8),
+            shuffle=self.config.data.get("validation_shuffle", True),
+            drop_last=False,
+            collate_fn=collate_fn,
+        )
+        
+        # train dataloader is on-the-fly, so we don't need to check the size
+        # assert len(self.train_dataloader) >= 1, "Train dataloader is empty!"
+        assert len(self.val_dataloader) >= 1, "Validation dataloader is empty!"
+
+        
+        if not isinstance(self.train_dataset,IterableDataset):
+            total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
+            print(f"Size of train dataloader: {len(self.train_dataloader)}, Size of val dataloader: {len(self.val_dataloader)}")
+        else:
+            # FIXME: need a elegant way to set total_training_steps
+            total_training_steps = len(self.train_task_manager.seed_tasks)*self.config.trainer.total_epochs
+            print(f"Size of train dataloader: unknown, Size of val dataloader: {len(self.val_dataloader)}")
+
+        if self.config.trainer.total_training_steps is not None:
+            total_training_steps = self.config.trainer.total_training_steps
+
+        self.total_training_steps = total_training_steps
+        print(f"Total training steps: {self.total_training_steps}")
+
+        try:
+            OmegaConf.set_struct(self.config, True)
+            with open_dict(self.config):
+                if OmegaConf.select(self.config, "actor_rollout_ref.actor.optim"):
+                    self.config.actor_rollout_ref.actor.optim.total_training_steps = total_training_steps
+                if OmegaConf.select(self.config, "critic.optim"):
+                    self.config.critic.optim.total_training_steps = total_training_steps
+        except Exception as e:
+            print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
+
 
     def _validate_config(self):
         # 0623 yunpeng add. keep the same as the original func except for the param of tool_config_path
@@ -366,8 +569,9 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                 self.async_rollout_manager.wake_up()
                 tasks = [Task(
                             task_id=test_gen_batch.non_tensor_batch["extras"][i]["task_id"], 
-                            query=test_gen_batch.non_tensor_batch["raw_prompt"][i],
+                            query=test_gen_batch.non_tensor_batch["extras"][i]['new_query'],
                             env_type=self.config.env_service.env_type
+                            # evaluator=gen_batch.non_tensor_batch['extras'][i]['evaluator'], # avoid potential bugs
                          ) for i in range(len(test_gen_batch))]
                 print("=" * 10 + "start validate rollout" + "=" * 10)
                 trajectories = self.env_manager.rollout(tasks, mode="validate", epoch=f"test.1.{i}")
@@ -425,7 +629,7 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
             assert len(lst) == 0 or len(lst) == len(sample_scores), f"{key_info}: {len(lst)=}, {len(sample_scores)=}"
 
         data_sources = np.concatenate(data_source_lst, axis=0)
-
+        
         data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
         metric_dict = {}
         for data_source, var2metric2val in data_src2var2metric2val.items():
@@ -521,8 +725,9 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                             # gen_batch_output = self.explorer_manager.rollout(gen_batch)
                             tasks = [Task(
                                         task_id=gen_batch.non_tensor_batch["extras"][i]["task_id"], 
-                                        query=gen_batch.non_tensor_batch["raw_prompt"][i],
-                                        env_type=self.config.env_service.env_type
+                                        query=gen_batch.non_tensor_batch["extras"][i]['new_query'],
+                                        env_type=self.config.env_service.env_type,
+                                        evaluator=gen_batch.non_tensor_batch['extras'][i]['evaluator'],
                                     ) for i in range(len(gen_batch))]
 
                             # TODO enable tracing by jinli 0619
@@ -722,6 +927,13 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                                 reward_extra_infos_dict=reward_extra_infos_dict,
                                 dump_path=rollout_data_dir,
                             )
+                            
+                            # save original trajectory
+                            filename = os.path.join(rollout_data_dir, f"traj_{self.global_steps}.jsonl")
+                            with open(filename, "w") as f:
+                                for traj in trajectories:
+                                    f.write(traj.json() + "\n")
+                            
 
                     # validate
                     if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0):
@@ -760,3 +972,9 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                     pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
                     return
+            
+            # we expect the train dataset is fully explored at the beginning, no reload needed.
+            # if isinstance(self.train_dataset, FullDataset):
+            #     self.train_dataset.reload()
+
+

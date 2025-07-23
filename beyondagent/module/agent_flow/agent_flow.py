@@ -1,25 +1,34 @@
 import json
 import time
+from typing import Optional, cast
 
 from loguru import logger
 
 from beyondagent.client.em_client import EMClient
 from beyondagent.client.env_client import EnvClient
 from beyondagent.module.agent_flow.base_agent_flow import BaseAgentFlow
+from beyondagent.module.agent_flow.reward_calculator import RewardCalculator
 from beyondagent.schema.trajectory import Trajectory
-from beyondagent.utils.utils import convert_tool_to_user_message
+from beyondagent.utils.utils import convert_tool_to_user_message, clip_state_content_correctly
 
 
 class AgentFlow(BaseAgentFlow):
 
-    def __init__(self, **kwargs):
+    def __init__(self,reward_calculator:Optional[RewardCalculator]=None, **kwargs):
         super().__init__(**kwargs)
+        # 优先传入的参数
+        self._reward_calculator = reward_calculator
+        if self._reward_calculator is not None:
+            logger.info(f"reward_calculator={self._reward_calculator}")
+        self._enable_context_generator=self.config.experience_maker.enable_context_generator
+
         self.instruction_template_ids = self.tokenizer.encode("<|im_start|>user\n")
         self.response_template_ids = self.tokenizer.encode("<|im_start|>assistant\n")
         self.em_client = EMClient(base_url=self.config.experience_maker.base_url)
 
     def execute(self, trajectory: Trajectory, env: EnvClient, instance_id: str, **kwargs) -> Trajectory:
-        if self.config.experience_maker.enable_context_generator:  # add by jinli 0618
+        # In some cases, context_generator will be disabled by setting self._enable_context_generator to False.
+        if self._enable_context_generator:
             history_experience = self.em_client.call_context_generator(
                 trajectory=trajectory,
                 retrieve_top_k=self.config.experience_maker.retrieve_top_k,
@@ -82,6 +91,7 @@ class AgentFlow(BaseAgentFlow):
 
             try:
                 env_output = env.step(instance_id, llm_output)
+                env_messages: list[dict] = env_output["state"]
             except Exception as e:
                 logger.exception(f"call env.step error with {e}")
                 break
@@ -89,17 +99,22 @@ class AgentFlow(BaseAgentFlow):
             # breakpoint()
             
             # useless: for tool role
-            if env_output["state"]["role"] == "tool":
-                env_output["state"] = convert_tool_to_user_message(env_output["state"], self.tokenizer, format="qwen")
-            
-            state_content: str = env_output["state"]["content"]
-            if len(self.tokenizer(state_content, return_tensors="pt", padding=False)["input_ids"][
-                       0]) > self.max_env_len:
-                env_output["state"]["content"] = state_content[:self.max_env_len]
+            assert len(env_messages)>0, "env returns empty messages"
+            for env_message in env_messages:
+                if env_message["role"] == "tool":
+                    env_message = cast(dict, convert_tool_to_user_message(env_message, format="qwen"))
+                
+                state_content: str = env_message["content"]
+                
+                env_message["content"] = clip_state_content_correctly(
+                    self.tokenizer, 
+                    state_content,
+                    self.max_env_len
+                )
+                
 
-            trajectory.steps.append(env_output["state"])
+                trajectory.steps.append(sanitize_env_state(env_message))
             trajectory.is_terminated = env_output["is_terminated"]
-
             # TODO require env
             # trajectory.reward.outcome = env_output["reward"]["outcome"]
             # trajectory.reward.description = env_output["reward"]["description"]
@@ -108,8 +123,10 @@ class AgentFlow(BaseAgentFlow):
 
             if trajectory.is_terminated:
                 break
-        
-        score = env.evaluate(instance_id, params={"sparse": False})
+        if self._reward_calculator is not None:
+            score = self._reward_calculator.calculate_reward(trajectory, env)
+        else:
+            score = env.evaluate(instance_id, params={"sparse": False})
         trajectory.reward.outcome = score
         trajectory.reward.description = "Outcome 1 = success, 0 = failure."
 
@@ -117,3 +134,14 @@ class AgentFlow(BaseAgentFlow):
             trajectory.steps = trajectory.steps[:-1]
 
         return trajectory
+
+
+def sanitize_env_state(state: dict):
+    """
+    sanitize env state
+    """
+    # remove empty tool_calls
+    if "tool_calls" in state and not state["tool_calls"]:
+        state.pop("tool_calls")
+    
+    return state
