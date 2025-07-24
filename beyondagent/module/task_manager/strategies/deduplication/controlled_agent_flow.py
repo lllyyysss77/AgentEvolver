@@ -8,7 +8,7 @@ from beyondagent.client.em_client import EMClient
 from beyondagent.client.env_client import EnvClient
 from beyondagent.module.agent_flow.base_agent_flow import BaseAgentFlow
 from beyondagent.module.agent_flow.reward_calculator import RewardCalculator
-from beyondagent.module.task_manager.strategies.dedup.embedding import StateRecorder
+from beyondagent.module.task_manager.strategies.deduplication.embedding import StateRecorder
 from beyondagent.schema.trajectory import Trajectory
 from beyondagent.utils.utils import convert_tool_to_user_message, clip_state_content_correctly
 
