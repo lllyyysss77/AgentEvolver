@@ -98,7 +98,7 @@ class LlmAsJudgeRewardCalculator(RewardCalculator):
             env (EnvClient): environment where the trajectory is executed
         """
         response=""
-        for chunk in self._client.chat_stream_with_retry(messages=self.pack_message(trajectory)):
+        for chunk in self._client.chat_stream_with_retry(messages=self.pack_message(trajectory),max_retries=64):
             response += chunk
         if response:
             import re
