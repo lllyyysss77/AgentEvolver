@@ -151,7 +151,7 @@ class TaskManager(object):
         # 每次最多探索所有不同任务，或者最大线程个任务，防止同批次中生成相同任务
         parallel_num = min(self._num_exploration_threads, len(tasks))
         with ThreadPoolExecutor(max_workers=self._num_exploration_threads) as pool:
-            for i in tqdm(range(0, len(task_q), parallel_num), disable=not show_progress):
+            for i in tqdm(range(0, len(task_q), parallel_num),desc="generating tasks", disable=not show_progress):
                 futures = [
                     pool.submit(self._exlore_and_summarize, task, data_id, rollout_id)
                     for task, data_id, rollout_id in zip(

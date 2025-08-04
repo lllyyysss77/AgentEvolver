@@ -43,24 +43,22 @@ class ControlledAgentFlow(BaseAgentFlow):
             new_steps = [
                 s for s in trajectory.steps
                 if not (s["role"] == "system" and
-                        "In the past interactions at this place" in s["content"])
+                        "Now decide the single best next action" in s["content"])
             ]
             trajectory.steps = new_steps
 
             # -------- 2. 生成 records --------
             records = self._state_recorder.get_state(trajectory)
-            if len(records) == 0:
-                continue
+            if len(records) != 0:
+                records_str = []
+                for idx, (action, state) in enumerate(records, start=1):
+                    records_str.append(f"## {idx}\n[action]\n{action[:self._max_record_len]}"
+                                    f"\n\n[state]\n{state[:self._max_record_len]}\n")
+                records_str = "\n".join(records_str)
+                records_str = self._compress_state_action(records_str)
 
-            records_str = []
-            for idx, (action, state) in enumerate(records, start=1):
-                records_str.append(f"## {idx}\n[action]\n{action[:self._max_record_len]}"
-                                f"\n\n[state]\n{state[:self._max_record_len]}\n")
-            records_str = "\n".join(records_str)
-            records_str = self._compress_state_action(records_str)
-
-            # -------- 3. 组装强化版 prompt --------
-            instruction = f"""## Local Context
+                # -------- 3. 组装强化版 prompt --------
+                instruction = f"""## Local Context
 You are currently **at the same location / state** as in the log below.
 
 ### Interaction Log (collapsed)
@@ -77,14 +75,14 @@ b) you need confirmation to reduce uncertainty.
 
 Now decide the single best next action.""".strip()
 
-            logger.debug("retrieve #records=%d, prompt_len=%d",len(records), len(instruction))
-
-            # -------- 4. 随机或固定策略把 prompt 写入对话 --------
-            if rng.random() <= 1.0:     # 这里仍然可调探索概率
-                trajectory.steps.append({
-                    "role": "user",
-                    "content": instruction
-                })
+                logger.debug(f"retrieve #records={len(records)}, prompt_len={len(instruction)}")
+                
+                # -------- 4. 随机或固定策略把 prompt 写入对话 --------
+                if rng.random() <= 1.0:     # 这里仍然可调探索概率
+                    trajectory.steps.append({
+                        "role": "user",
+                        "content": instruction
+                    })
             
             assert len(trajectory.steps)>2
             assert trajectory.steps[0]['role'] == 'system'
@@ -100,7 +98,7 @@ Now decide the single best next action.""".strip()
 
             # yunpeng 0623: to prevent add an imend token to an uncompleted seq, 
             # because the message-type output will be applied chat_template.
-            max_response_length = 102400 # TODO qwen-plus max_length
+            max_response_length = self.config.actor_rollout_ref.rollout.response_length # TODO qwen-plus max_length
             if current_token_len + max_response_length > self.max_model_len:
                 logger.warning(f"exceed max model, current_token_len={current_token_len}, max_response_length={max_response_length}, max_model_len={self.max_model_len}")
                 break

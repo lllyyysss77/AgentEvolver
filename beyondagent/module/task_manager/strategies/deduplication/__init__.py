@@ -74,6 +74,7 @@ class LlmDedupSamplingExploreStrategy(TaskExploreStrategy):
             config=self._config,
         )
         agent_flow.max_steps = self._max_explore_step  # this is ugly
+        agent_flow.max_model_len=102400 # TODO max len
 
         traj = env_worker.execute(
             data_id=data_id,
@@ -98,6 +99,7 @@ class LlmDedupSamplingExploreStrategy(TaskExploreStrategy):
         task=task.copy()
         task.evaluator='synthetic'
         tasks = parse_tasks_from_response(task, llm_output)
+        # FIXME save log
         return tasks
     
     def _get_llm_chat_fn(self, sampling_params: Optional[dict] = None) -> Callable:
