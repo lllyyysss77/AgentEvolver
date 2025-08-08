@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import copy
 from typing import Sequence, List, Optional
 import random
 import math
@@ -79,10 +80,9 @@ class UnifiedMixtureStrategy(MixtureStrategy):
         mixed_objectives = []
         
         if self._use_original:
-            mixed_objectives.extend(original_tasks)
-            if self._original_data_ratio>1.0:
-                mixed_objectives = mixed_objectives * int(self._original_data_ratio)
-            logger.info(f"added {len(original_tasks)} original tasks ({len(original_tasks)} x {self._original_data_ratio} times)")
+            for i in range(int(self._original_data_ratio)):
+                mixed_objectives.extend(copy.deepcopy(original_tasks))
+            logger.info(f"added {len(mixed_objectives)} original tasks ({len(original_tasks)} x {self._original_data_ratio} times)")
         
         if self._synthetic_ratio > 0:
             target_synthetic_count = int(len(original_tasks) * self._synthetic_ratio)
