@@ -1,5 +1,22 @@
 import functools
-from typing import Type, Dict, Callable, Any
+from typing import Tuple, Type, Dict, Callable, Any
+
+import functools
+from dataclasses import dataclass
+from typing import Type, Dict, Callable, Any, Optional
+
+
+@dataclass
+class _RegEntry:
+    """
+    注册条目：
+    - cls: 注册的计算器类
+    - singleton: 是否按全局单例返回
+    - instance: 当 singleton=True 时缓存的单例实例
+    """
+    cls: Type
+    singleton: bool = False
+    instance: Optional[Any] = None
 
 class RewardCalculatorManager:
     """
@@ -7,9 +24,10 @@ class RewardCalculatorManager:
 
     该类维护一个从名称到计算器类的注册表，并提供一个装饰器
     用于自动注册，以及一个工厂方法用于根据名称获取实例。
+    支持在注册时声明某个计算器为“全局单例”。
     """
     _instance = None
-    _registry: Dict[str, Type] = {}
+    _registry: Dict[str, _RegEntry] = {}
 
     def __new__(cls, *args, **kwargs):
         """
@@ -19,23 +37,27 @@ class RewardCalculatorManager:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def reg(self, name: str) -> Callable:
+    def reg(self, name: str, *, singleton: bool = False) -> Callable:
         """
         注册装饰器。将一个类与一个给定的名称关联起来。
+        可通过 singleton=True 将该计算器以全局单例方式提供。
 
         用法:
-            @calculator_manager.reg("my_calculator")
-            class MyCalculator:
-                ...
+            @calculator_manager.reg("my_calc")  # 普通（每次新建实例）
+            class MyCalc: ...
+
+            @calculator_manager.reg("my_singleton_calc", singleton=True)  # 全局单例
+            class MySingletonCalc: ...
+
+        参数:
+            name: 注册名
+            singleton: 是否作为全局单例提供实例
         """
         def decorator(calculator_cls: Type) -> Type:
             if name in self._registry:
                 print(f"警告：名称 '{name}' 已被注册，将被新的类 '{calculator_cls.__name__}' 覆盖。")
-            
-            # 将类本身存入注册表
-            self._registry[name] = calculator_cls
-            
-            # 装饰器返回原始类，不进行任何修改
+            # 覆盖注册时，若此前有单例实例，会被丢弃并以新类为准
+            self._registry[name] = _RegEntry(cls=calculator_cls, singleton=singleton, instance=None)
             return calculator_cls
         return decorator
 
@@ -43,19 +65,28 @@ class RewardCalculatorManager:
         """
         工厂方法。根据注册的名称获取一个计算器类的实例。
 
+        - 对于普通注册（singleton=False），每次返回一个新的实例。
+        - 对于单例注册（singleton=True），首次调用时用提供的参数创建实例并缓存，之后始终返回同一个实例，
+          再次调用传入的参数将被忽略。
+
         :param name: 注册时使用的字符串名称。
         :param args: 传递给计算器类构造函数的定位参数。
         :param kwargs: 传递给计算器类构造函数的关键字参数。
-        :return: 对应计算器类的一个新实例。
+        :return: 对应计算器类的实例（可能是新建，也可能是全局单例）。
         :raises ValueError: 如果提供的名称没有被注册。
         """
-        calculator_cls = self._registry.get(name)
-        if not calculator_cls:
+        entry = self._registry.get(name)
+        if not entry:
             raise ValueError(f"错误：没有找到名为 '{name}' 的奖励计算器。可用名称: {list(self._registry.keys())}")
-        
-        # 创建并返回该类的一个新实例，并传递所有参数
-        return calculator_cls(*args, **kwargs)
 
+        if entry.singleton:
+            if entry.instance is None:
+                # 首次创建单例实例并缓存
+                entry.instance = entry.cls(*args, **kwargs)
+            return entry.instance
+
+        # 非单例：每次返回新实例
+        return entry.cls(*args, **kwargs)
 # ----------------------------------------------------------------------------
 # 示例用法
 # ----------------------------------------------------------------------------

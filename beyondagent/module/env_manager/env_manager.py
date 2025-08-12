@@ -98,6 +98,7 @@ class ParallelEnvManager(object):
         reward_caculator=grader_manager.get_calculator(task.evaluator)
         if isinstance(reward_caculator,LlmAsJudgeRewardCalculatorWithGT):
             reward_caculator.set_gt(task.ground_truth)
+        # 注意有一些 reward calculator 是单例类，因为此处是多线程，所以不需要担心信息共享的问题
         agent_flow: BaseAgentFlow = AgentFlow(
             reward_calculator=reward_caculator,
             llm_chat_fn=llm_chat_fn, 

@@ -72,7 +72,8 @@ Please note that the average score must be maintained around {mean_score:.4f} (+
 
 # TODO add gt and append instruction at `Score 0 if ANY failure occurs`
 
-@grader_manager.reg("llm-binary")
+# 这是一个单例类
+@grader_manager.reg("llm-binary", singleton=True)
 class LlmAsJudgeBinaryRewardCalculator(RewardCalculator):
     """
     RewardCalculator that uses LLM as judge.
