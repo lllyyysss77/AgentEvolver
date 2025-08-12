@@ -1,4 +1,5 @@
 import re
+import threading
 from typing import Optional, cast
 from loguru import logger
 from beyondagent.client.env_client import EnvClient
@@ -82,6 +83,7 @@ class LlmAsJudgeBinaryRewardCalculator(RewardCalculator):
         self._client=DashScopeClient(model_name=model_name)
         self._mean_score=mean_score
         self._running_judge_mean=self._mean_score
+        self._update_lock=threading.Lock()
     
     def pack_message(self, trajectory: Trajectory):
         """Pack trajectory into a message.
@@ -163,7 +165,8 @@ class LlmAsJudgeBinaryRewardCalculator(RewardCalculator):
         else:
             logger.warning("Empty LLM judge response; setting score=0.0")
         
-        self._running_judge_mean=(self._running_judge_mean*0.9+score*0.1)
+        with self._update_lock:
+            self._running_judge_mean=(self._running_judge_mean*0.9+score*0.1)
 
         if not eject_llm_output:
             return score
