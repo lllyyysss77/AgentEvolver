@@ -98,6 +98,7 @@ class UnifiedMixtureStrategy(MixtureStrategy):
                 logger.info(f"added {len(selected_synthetic)} synthetic tasks (ratio={self._synthetic_ratio})")
         
         if self._shuffle:
+            logger.debug("shuffling data")
             rng.shuffle(mixed_objectives)
         
         original_count = len(original_tasks) if self._use_original else 0
