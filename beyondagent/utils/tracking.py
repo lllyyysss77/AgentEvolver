@@ -93,7 +93,7 @@ class Tracking:
                 config={"FRAMEWORK": "verl", **config},
                 logdir=SWANLAB_LOG_DIR,
                 mode=SWANLAB_MODE,
-                settings=swanlab.Settings(backup=False)
+                settings=swanlab.Settings(backup=False, log_proxy_type='none')
             )
             self.logger["swanlab"] = swanlab
 

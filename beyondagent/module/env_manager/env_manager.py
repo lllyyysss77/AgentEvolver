@@ -179,6 +179,7 @@ class ParallelEnvManager(object):
         # 6. 最终排序和返回
         # 所有任务都已成功完成
         trajectory_list = sorted(trajectory_list, key=lambda x: (int(x.data_id), int(x.rollout_id)))
+        logger.info(f"Epoch {epoch}: Collected {len(trajectory_list)} trajectories")
         return trajectory_list
 
     # TODO: define an extra class for trajectory-dataproto converting.
