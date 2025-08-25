@@ -5,6 +5,8 @@ from typing import Dict, List, Literal
 
 import numpy as np
 import torch
+import random
+import re
 from loguru import logger
 from omegaconf import DictConfig
 from tensordict import TensorDict
@@ -38,6 +40,8 @@ class ParallelEnvManager(object):
         self.tokenizer = self.async_rollout_manager.chat_scheduler.completion_callback.tokenizer
         self.pad_token_id = self.tokenizer.pad_token_id
         self.rollout_config = config.actor_rollout_ref.rollout
+
+        self.experience_template = config.experience_maker.experience_template
 
     def get_llm_chat_fn(self, sampling_params: dict = None) -> callable:
         def llm_chat(messages: List[Dict[str, str]],
@@ -74,7 +78,7 @@ class ParallelEnvManager(object):
         return llm_chat
 
     def rollout_env_worker(self, task: Task, data_id: str, rollout_id: str, mode: Literal["sample", "validate"],
-                           thread_index: int, **kwargs) -> Trajectory:
+                           thread_index: int, add_exp: bool, task_train_exp_mode: str, **kwargs) -> Trajectory: # add add_exp & task_train_exp_mode by ANNI
         """
         Process a single prompt in a thread-safe way.
         """
@@ -103,22 +107,41 @@ class ParallelEnvManager(object):
         # FIXME pass env_type & task_id
         env_worker = EnvWorker(task=task, thread_index=thread_index,
                                config=self.config)
-        trajectory: Trajectory = env_worker.execute(data_id=data_id, rollout_id=rollout_id, agent_flow=agent_flow)
+        trajectory: Trajectory = env_worker.execute(data_id=data_id, rollout_id=rollout_id, add_exp=add_exp, task_train_exp_mode=task_train_exp_mode, agent_flow=agent_flow) # add add_exp & task_train_exp_mode by ANNI
 
         return trajectory
 
     def rollout(self, tasks: List[Task], mode: Literal["sample", "validate"], epoch: str) -> List[Trajectory]:
         trajectory_list: List[Trajectory] = []
-        rollout_n = 1 if mode=="validate" else self.rollout_n
+        #############
+        # ANNI 0814
+        if mode == "validate":
+            rollout_n = self.rollout_config.val_kwargs.n
+            exp_mode = self.config.hybrid_experience_training.val_rollout_expmode
+        else:
+            rollout_n = self.rollout_n
+            exp_mode = self.config.hybrid_experience_training.train_rollout_expmode
+        add_exp_choices = {
+            "woexp": [False] * rollout_n,
+            "mixed": sorted([i < round(rollout_n*self.config.hybrid_experience_training.rollout_expratio) for i in range(rollout_n)], key=lambda _: random.random()),
+            "all": [True] * rollout_n
+        }[exp_mode]
+
+        task_train_exp_modes = [
+            task.metadata.get("task_train_exp_mode", "keep")
+            for task in tasks
+        ]   # len(tasks)个: task_train_exp_mode是query/task-level的
+
         with ThreadPoolExecutor(max_workers=self.max_parallel) as executor:
             futures = []
-            for data_id, task in enumerate(tasks):
+            for data_id, (task, task_train_exp_mode) in enumerate(zip(tasks, task_train_exp_modes)):
                 for rollout_id in range(rollout_n):
                     thread_index = data_id * rollout_n + rollout_id
+                    add_exp = add_exp_choices[rollout_id]
                     future = executor.submit(self.rollout_env_worker, task=task, data_id=str(data_id),
-                                             rollout_id=str(rollout_id), mode=mode, thread_index=thread_index)
+                                            rollout_id=str(rollout_id), mode=mode, thread_index=thread_index, add_exp=add_exp, task_train_exp_mode=task_train_exp_mode)  # add add_exp & task_train_exp_mode by ANNI
                     futures.append(future)
-
+        #############
             for future in tqdm(futures, desc=f"epoch{epoch}.collect_rollout"):
                 # do not fail silently
                 result = future.result()
@@ -138,6 +161,20 @@ class ParallelEnvManager(object):
         
         return dataproto
     
+    #############
+    # ANNI 0825
+    @staticmethod
+    def extract_and_discard_experience(input_string, experience_template):
+        pattern = re.escape(experience_template).replace(r'\{\}', '(.*?)')
+        match = re.search(pattern, input_string)
+        if match:
+            experience = match.group(1)
+            prompt = re.sub(pattern, '', input_string)
+            return experience, prompt
+        else:
+            return "", input_string
+    #############
+
     def trajectories_to_samples(self, trajectories: List[Trajectory]) -> List[Sample]:
         """Convert trajectories to samples"""
         samples = []
@@ -155,6 +192,21 @@ class ParallelEnvManager(object):
                 samples.append(sample)
                 continue
                 # messages = [{"role": "user", "content": ""}, {"role": "assistant", "content": ""}]
+            
+            #############
+            # ANNI 0825
+            # import pdb;pdb.set_trace()
+            train_sample_exp_mode = trajectory.metadata.get("task_train_exp_mode", "keep")  # "keep" or "discard"
+            # print(train_sample_exp_mode)
+
+            if train_sample_exp_mode == "keep":
+                experiences = [self.extract_and_discard_experience(msg["content"], self.experience_template)[0] for msg in messages]
+            elif train_sample_exp_mode == "discard":
+                experiences, prompts = zip(*[self.extract_and_discard_experience(msg["content"], self.experience_template) for msg in messages])
+                for msg, prompt in zip(messages, prompts):
+                    msg["content"] = prompt
+            #############
+
             full_text = self.tokenizer.apply_chat_template(messages, tokenize=False)
             outputs = self.tokenizer(full_text, return_tensors="pt", padding=False)
             input_ids = outputs["input_ids"][0].tolist()  # 移除batch维度
@@ -228,6 +280,10 @@ class ParallelEnvManager(object):
                 reward_scores=trajectory.reward.model_dump(),
                 max_prompt_len=self.config.data.max_prompt_length,
                 max_response_len=self.config.data.max_response_length,
+                extras={
+                    "add_exp": trajectory.metadata.get("add_exp", None),
+                    "experience": experiences
+                },  # add add_exp and experience info by ANNI
             )
             sample.truncate_output_ids()
             samples.append(sample)
@@ -242,7 +298,12 @@ class ParallelEnvManager(object):
         prompt_loss_mask, response_loss_mask = [], []
         messages = []
         reward_scores = []
-
+        ############
+        # ANNI
+        extras = []
+        exp_mask_list = []
+        ############
+        
         for sample in samples:
             # Validate that all fields have the same length
             assert len(sample.input_ids) == len(sample.attention_mask) == len(sample.position_ids) == len(
@@ -282,6 +343,18 @@ class ParallelEnvManager(object):
             messages.append({"messages": sample.messages})
             reward_scores.append(sample.reward_scores)
 
+            ############
+            # ANNI
+            mask_length = len(sample.loss_mask)
+            add_exp = sample.extras.get("add_exp", False)
+            if add_exp:
+                exp_mask_list.append(torch.ones(mask_length, dtype=torch.int))
+            else:
+                exp_mask_list.append(torch.zeros(mask_length, dtype=torch.int))
+
+            extras.append(sample.extras)
+            ############
+
         # Batch and pad sequences
         prompt_ids = pad_sequence(prompt_ids, batch_first=True, padding_value=self.pad_token_id, padding_side="left")
         prompt_ids = pad_sequence_to_length(prompt_ids, self.config.data.max_prompt_length, self.pad_token_id, left_pad=True)
@@ -317,6 +390,15 @@ class ParallelEnvManager(object):
         position_ids = torch.cat((prompt_position_ids, response_position_ids), dim=-1)
         loss_mask = torch.cat((prompt_loss_mask, response_loss_mask), dim=-1)
 
+        ############
+        # ANNI
+        exp_mask = pad_sequence(exp_mask_list, batch_first=True, padding_value=0)
+        exp_mask = pad_sequence_to_length(exp_mask, self.config.data.max_prompt_length + self.config.data.max_response_length, 0)
+
+        assert exp_mask.shape == loss_mask.shape, f"Shape mismatch: {exp_mask.shape} vs {loss_mask.shape}"
+        ############
+
+
         # Construct the batch using TensorDict
         batch = TensorDict(
             {
@@ -326,8 +408,9 @@ class ParallelEnvManager(object):
                 "attention_mask": attention_mask,
                 "position_ids": position_ids,
                 "loss_mask": loss_mask,
+                "exp_mask": exp_mask        # add exp_mask by ANNI
             },
             batch_size=len(samples),
         )
 
-        return DataProto(batch=batch, non_tensor_batch={"messages": np.array(messages), "reward_scores": np.array(reward_scores)})
+        return DataProto(batch=batch, non_tensor_batch={"messages": np.array(messages), "reward_scores": np.array(reward_scores), "extras": np.array(extras)})  # add extras by ANNI

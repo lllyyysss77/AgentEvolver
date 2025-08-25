@@ -25,10 +25,13 @@ class AgentFlow(BaseAgentFlow):
         self.instruction_template_ids = self.tokenizer.encode("<|im_start|>user\n")
         self.response_template_ids = self.tokenizer.encode("<|im_start|>assistant\n")
         self.em_client = EMClient(base_url=self.config.experience_maker.base_url)
+        self.sparse = self.config.actor_rollout_ref.rollout.sparse  # add sparse by ANNI 0723
+        self.experience_template = self.config.experience_maker.experience_template
 
-    def execute(self, trajectory: Trajectory, env: EnvClient, instance_id: str, **kwargs) -> Trajectory:
+
+    def execute(self, trajectory: Trajectory, env: EnvClient, instance_id: str, add_exp: bool, task_train_exp_mode: str, **kwargs) -> Trajectory:   # add add_exp and task_train_exp_mode by ANNI
         # In some cases, context_generator will be disabled by setting self._enable_context_generator to False.
-        if self._enable_context_generator:
+        if self._enable_context_generator and add_exp:
             history_experience = self.em_client.call_context_generator(
                 trajectory=trajectory,
                 retrieve_top_k=self.config.experience_maker.retrieve_top_k,
@@ -36,7 +39,8 @@ class AgentFlow(BaseAgentFlow):
 
             if history_experience:
                 logger.info(f"history_experience={history_experience}")
-                new_content = history_experience + "\n\n" + trajectory.steps[-1]["content"]
+                formatted_experience = self.experience_template.format(history_experience)
+                new_content = trajectory.steps[-1]["content"] + formatted_experience
                 trajectory.steps[-1]["content"] = new_content
             else:
                 logger.info(f"history_experience is empty!")
@@ -126,12 +130,17 @@ class AgentFlow(BaseAgentFlow):
         if self._reward_calculator is not None:
             score = self._reward_calculator.calculate_reward(trajectory, env)
         else:
-            score = env.evaluate(instance_id, params={"sparse": False})
+            # add sparse by ANNI 0723
+            score = env.evaluate(instance_id, params={"sparse": self.sparse})
         trajectory.reward.outcome = score
         trajectory.reward.description = "Outcome 1 = success, 0 = failure."
 
         if trajectory.steps[-1]["role"] == "user":
             trajectory.steps = trajectory.steps[:-1]
+
+        # add add_exp & task_train_exp_mode by ANNI 
+        trajectory.metadata["add_exp"] = add_exp
+        trajectory.metadata["task_train_exp_mode"] = task_train_exp_mode
 
         return trajectory
 
