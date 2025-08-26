@@ -753,10 +753,9 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                                 compute_prm_grpo_advantages, PRMHyper
                             )
                             hyper = PRMHyper(
-                                alpha_pos=getattr(sem_cfg, "alpha_pos", 1.0),
-                                beta_pos =getattr(sem_cfg, "beta_pos", 0.2),
-                                alpha_neg=getattr(sem_cfg, "alpha_neg", 1.0),
-                                beta_neg =getattr(sem_cfg, "beta_neg", 0.2),
+                                consistent_scale=getattr(sem_cfg, "consistent_scale", 1.0),
+                                pos_unconsistent_scale =getattr(sem_cfg, "pos_unconsistent_scale", 0.2),
+                                neg_unconsistent_scale =getattr(sem_cfg, "neg_unconsistent_scale", 0.2),
                             )
 
                             out = compute_prm_grpo_advantages(

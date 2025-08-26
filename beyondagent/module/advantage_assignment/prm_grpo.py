@@ -7,10 +7,9 @@ from dataclasses import dataclass
 
 @dataclass
 class PRMHyper:
-    alpha_pos: float = 1.0
-    beta_pos:  float = 0.2
-    alpha_neg: float = 1.0
-    beta_neg:  float = 0.2
+    consistent_scale: float = 1.0
+    pos_unconsistent_scale:  float = 0.2
+    neg_unconsistent_scale:  float = 0.2
     eps:       float = 1e-8
 
 def _step_end_indices_from_step_ids(step_ids_row: torch.Tensor) -> List[int]:
@@ -61,11 +60,11 @@ def compute_step_rewards_from_flags(
         n_g, n_b = max(1, len(good_idx)), max(1, len(bad_idx))
 
         if O >= 0:
-            r_g =  hyper.alpha_pos * abs(O) / n_g
-            r_b = -hyper.beta_pos  * abs(O) / n_b
+            r_g =  hyper.consistent_scale * abs(O) / n_g
+            r_b = -hyper.pos_unconsistent_scale  * abs(O) / n_b
         else:
-            r_g =  hyper.beta_neg  * abs(O) / n_g
-            r_b = -hyper.alpha_neg * abs(O) / n_b
+            r_g =  hyper.neg_unconsistent_scale  * abs(O) / n_g
+            r_b = -hyper.consistent_scale * abs(O) / n_b
 
         r = [0.0] * K
         for j in good_idx: r[j] = r_g
