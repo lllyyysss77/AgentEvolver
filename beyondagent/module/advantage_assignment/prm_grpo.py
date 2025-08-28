@@ -406,5 +406,5 @@ def compute_prm_grpo_advantages(
 
     return {
         "advantages": advantages,        # (B, L_resp)
-        "orm_scalar": orms_sign,         # (B,)
+        "orm_scalar": orms_score,         # (B,)
     }
