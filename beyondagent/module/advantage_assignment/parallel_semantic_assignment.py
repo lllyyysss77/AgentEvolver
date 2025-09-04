@@ -430,12 +430,16 @@ async def evaluate_step_flags_parallel(tokenizer, batch, overall_score_source: s
         sample_mask = response_mask[sample_idx]
         if overall_score_source == "token_level_rewards":
             # PRM-GRPO 模式：使用原始 ORM 奖励
-            overall_score = batch.batch["token_level_rewards"][sample_idx].sum().item()
+            # shuchang
+            orm_sum = batch.batch["token_level_rewards"][sample_idx].sum().item()
+            orm_scores = torch.where(orm_sum > 0, torch.ones_like(orm_sum), -torch.ones_like(orm_sum)).to(dtype=torch.float32)
+
+            overall_score = orm_scores
         elif overall_score_source == "advantages":
             # SSA 模式：使用计算后的 advantage
             overall_score = _get_overall_advantage(batch.batch["advantages"][sample_idx], sample_mask)
 
-        if abs(overall_score) < 1e-8:
+        if abs(_get_overall_advantage(batch.batch["advantages"][sample_idx], sample_mask)) < 1e-8:
             print(f"[parallel_eval] Sample {sample_idx}: advantage≈0 ({overall_score:.6f}), skipping evaluation, returning all GOOD")
             flags_per_sample[sample_idx] = [True] * len(steps_struct)
 
