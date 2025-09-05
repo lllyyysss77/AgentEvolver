@@ -485,6 +485,9 @@ async def evaluate_step_flags_parallel(tokenizer, batch, overall_score_source: s
     total_tasks = len(all_tasks)
     total_api_calls = total_tasks  # 现在每个sample只需要一次API调用
     total_steps = sum(len(t.steps) for t in all_tasks)
+    # --- 指标准备：每个样本的step长度 ---
+    step_len_map = {t.sample_idx: len(t.steps) for t in all_tasks}
+    step_len_list = list(step_len_map.values())
     
     print(f"[parallel_eval] 🚀 EFFICIENCY GAIN:")
     print(f"[parallel_eval]   - Total samples: {batch_size}")
@@ -558,6 +561,31 @@ async def evaluate_step_flags_parallel(tokenizer, batch, overall_score_source: s
         "save_dir": save_dir,
         "efficiency_gain": total_steps / max(1, len(all_results))  # 效率提升倍数
     }
+    def _p95(vals):
+        if not vals:
+            return 0.0
+        s = sorted(vals)
+        k = int(round(0.95 * (len(s) - 1)))
+        return float(s[k])
+
+    parsed_ok = sum(
+        1 for r in all_results
+        if len(r.step_results) == step_len_map.get(r.sample_idx, 0)
+    )
+    length_mismatch = sum(
+        1 for r in all_results
+        if len(r.step_results) != step_len_map.get(r.sample_idx, 0)
+    )
+
+    stats.update({
+        "prm/parse_success_rate": parsed_ok / max(1, total_tasks),
+        "prm/avg_steps_per_sample": (sum(step_len_list) / max(1, len(step_len_list))) if step_len_list else 0.0,
+        "prm/p95_steps_per_sample": _p95(step_len_list),
+        "prm/flags_len_mismatch_rate": length_mismatch / max(1, total_tasks),
+        # 可选：原始计数，便于排错
+        "prm/_parse_success_count": parsed_ok,
+        "prm/_flags_len_mismatch_count": length_mismatch,
+    })
     
     print(f"[parallel_eval] ✅ Completed with {stats['efficiency_gain']:.1f}x efficiency gain!")
     print(f"[parallel_eval] Stats: {stats}")

@@ -138,12 +138,11 @@ def create_rl_sampler(data_config, dataset):
     return sampler
 
 
-
 class BeyondAgentRayPPOTrainer(RayPPOTrainer):
     """
     Note that this trainer runs on the driver process on a single CPU/GPU node.
     """
-    
+
     def __init__(
         self,
         config,
@@ -346,11 +345,11 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
             for split in ['val','dev']:
                 if self.val_task_manager.load_tasks_from_environment(env_client,env_type=self.config.env_service.env_type,split=split)>0:
                     break
-        
+
         self.train_dataset=self.train_task_manager.get_or_load_full_dataset(filepath=self.config.task_manager.train_data_path,tokenizer=self.tokenizer,config=self.config.data,processor=self.processor)
         # although limiting dataset to only the original is possibile with strategy, we want to avoid the rollout process on val data.
         self.val_dataset=self.val_task_manager.get_original_dataset(tokenizer=self.tokenizer,config=self.config.data,processor=self.processor)
-        
+
         assert not isinstance(self.train_dataset,AutoReloadDataset), "please disable multiple workers for AutoReloadDataset"
         assert not isinstance(self.val_dataset,AutoReloadDataset), "please disable multiple workers for AutoReloadDataset"
         self.train_dataloader = StatefulDataLoader(
@@ -374,13 +373,12 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
             drop_last=False,
             collate_fn=collate_fn,
         )
-        
+
         # train dataloader is on-the-fly, so we don't need to check the size
         # assert len(self.train_dataloader) >= 1, "Train dataloader is empty!"
         assert len(self.val_dataloader) >= 1, "Validation dataloader is empty!"
 
-        
-        if not isinstance(self.train_dataset,IterableDataset):
+        if not isinstance(self.train_dataset, IterableDataset):
             total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
             print(f"Size of train dataloader: {len(self.train_dataloader)}, Size of val dataloader: {len(self.val_dataloader)}")
         else:
@@ -1059,7 +1057,7 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                             multi_turn=self.config.actor_rollout_ref.rollout.multi_turn.enable,
                             config=self.config.algorithm,
                         )
-                        # ============= Begin PRM GRPO =============
+                        # ============= shuchang: Begin PRM GRPO =============
                         if enable_prm_grpo and epoch < prm_epoch:
                             # === (A) 解析/校验 step 边界 ===
                             if not verify_step_alignment(batch, self.tokenizer, self.global_steps):
@@ -1079,6 +1077,61 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                                 epoch=f"train.{epoch}.{i}",
                                 skip_type=getattr(prm_cfg, 'skip_type', "skip_small_adv"),
                             )
+                            # --- 指标统计：PRM评估结果统计信息 ---
+                            if isinstance(stats, dict):
+                                for k in (
+                                    "prm/parse_success_rate",
+                                    "prm/avg_steps_per_sample",
+                                    "prm/p95_steps_per_sample",
+                                    "prm/flags_len_mismatch_rate",
+                                    # 可选：需要原始计数就放开下面两个
+                                    # "prm/_parse_success_count",
+                                    # "prm/_flags_len_mismatch_count",
+                                ):
+                                    v = stats.get(k, None)
+                                    if v is not None:
+                                        try:
+                                            metrics[k] = float(v)
+                                        except Exception:
+                                            metrics[k] = v  # 若已是数值类型或小字典就原样塞进去
+                            # --- 指标：PRM标注与ORM方向的一致性 --- 
+                            # 统一flags为 List[List[bool]]
+                            step_flags = flags if isinstance(flags, list) else flags.get("llm_parsed_flags", [])
+                            # 计算每个样本的终端ORM符号（token_level_rewards优先，否则回退到token_level_scores）
+                            if "token_level_rewards" in batch.batch:
+                                orm_sum = batch.batch["token_level_rewards"].sum(dim=-1)
+                            else:
+                                orm_sum = batch.batch["token_level_scores"].sum(dim=-1)
+
+                            pos_mask = (orm_sum > 0)
+                            neg_mask = ~pos_mask
+
+                            def _count_for_indices(mask_tensor):
+                                total = 0
+                                good = 0
+                                bad = 0
+                                if mask_tensor.dtype != torch.bool:
+                                    mask_tensor = mask_tensor.bool()
+                                idx_list = torch.nonzero(mask_tensor, as_tuple=False).view(-1).tolist()
+                                for idx in idx_list:
+                                    if idx >= len(step_flags) or not step_flags[idx]:
+                                        continue
+                                    fs = step_flags[idx]
+                                    total += len(fs)
+                                    good += sum(1 for f in fs if f)
+                                    bad  += sum(1 for f in fs if not f)
+                                return total, good, bad
+
+                            pos_total, pos_good, pos_bad = _count_for_indices(pos_mask)
+                            neg_total, neg_good, neg_bad = _count_for_indices(neg_mask)
+
+                            metrics.update({
+                                "prm/pos_traj_bad_rate": (pos_bad / max(1, pos_total)),
+                                "prm/neg_traj_good_rate": (neg_good / max(1, neg_total)),
+                                "prm/good_steps_total": float(pos_good + neg_good),
+                                "prm/bad_steps_total": float(pos_bad + neg_bad),
+                            })
+                            # --- 指标统计：PRM评估结果统计信息 ---
 
                             # === (C) PRM → GRPO 后缀和 ===
                             from beyondagent.module.advantage_assignment.prm_grpo import (
@@ -1116,6 +1169,9 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
 
                             # 写回 advantages，供后续 actor/critic 更新
                             batch.batch["advantages"] = out["advantages"]
+                            # ✅ 并入 decouple 统计指标（若存在）
+                            if isinstance(out, dict) and "metrics" in out and isinstance(out["metrics"], dict):
+                                metrics.update(out["metrics"])
                         # ============= End PRM GRPO =============
                         
                         

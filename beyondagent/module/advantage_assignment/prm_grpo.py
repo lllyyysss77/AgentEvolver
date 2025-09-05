@@ -443,6 +443,19 @@ def _build_decouple(
     
     # ---- 4. 组合标准化的 PRM 和 ORM ----
     combined_rewards: List[List[float]] = []
+    
+    # 为统计准备容器
+    per_traj_attr_abs_sum = []   # α * |PRM_std| 的逐轨迹总和（不含 ORM）
+    per_traj_out_abs_sum  = []   # ORM_std 的逐轨迹总和（all_steps: K * |orm_std|；last_step: |orm_std|）
+    per_traj_out_last_abs = []   # 最后一步上 ORM 的绝对值（用于 outcome_share_last_mean）
+    sum_sign_agree_flags  = []   # ∑(combined_step_reward) 与 原始 ORM 符号是否一致
+    pos_major_good, pos_cnt = 0, 0
+    neg_major_bad , neg_cnt = 0, 0
+
+    # 为 PRM/ORM 的分布统计准备容器
+    flat_attr_vals = []          # 所有 step 的 PRM 标准化值（未乘 α）
+    out_vals       = []          # 每条轨迹一个 ORM 标准化值
+    
     for i in range(B):
         if not prm_rewards_std[i]:
             combined_rewards.append([])
@@ -451,6 +464,9 @@ def _build_decouple(
         prm_std = prm_rewards_std[i]
         orm_std = orm_scores_std[i]
         K = len(prm_std)
+        # --- PRM/ORM 分布统计采样 ---
+        flat_attr_vals.extend(prm_std)
+        out_vals.append(float(orm_std))
 
         # 🔥 关键区别：是否计算长度正则化因子
         if enable_length_normalization:
@@ -461,9 +477,11 @@ def _build_decouple(
             print(f"轨迹 {i}: 长度={K}, 无长度正则化 (缩放因子=1.0)")
         
         combined = []
+        # 逐步构造 combined_step_reward，并计算 per-traj 的各种和
+        attr_abs_sum = 0.0  # α * Σ_j |prm_std[j]|
         for j, prm_reward in enumerate(prm_std):
             if orm_distribution == "last_step":
-                if j == len(prm_std) - 1:
+                if j == K - 1:
                     combined_reward = alpha * prm_reward + orm_std
                 else:
                     combined_reward = alpha * prm_reward
@@ -471,15 +489,94 @@ def _build_decouple(
                 combined_reward = alpha * prm_reward + orm_std
             else:
                 raise ValueError(f"Unknown orm_distribution: {orm_distribution}")
-            
-            # 🔥 关键区别：应用长度正则化
+
             final_reward = combined_reward * length_scale
             combined.append(float(final_reward))
-        
-        combined_rewards.append(combined)
-    
-    return combined_rewards
+            attr_abs_sum += abs(alpha * prm_reward)
 
+        # ORM 的绝对贡献（逐轨迹）
+        if orm_distribution == "last_step":
+            out_abs_sum = abs(orm_std)               # 只在最后一步加
+            out_last_abs = abs(orm_std)
+        else:  # "all_steps"
+            out_abs_sum = K * abs(orm_std)           # 每步都加同一个 orm_std
+            out_last_abs = abs(orm_std)
+
+        per_traj_attr_abs_sum.append(float(attr_abs_sum))
+        per_traj_out_abs_sum.append(float(out_abs_sum))
+        per_traj_out_last_abs.append(float(out_last_abs))
+
+        # ∑(combined_step_reward) 与「原始」ORM 符号一致性（不使用 z-score 后的符号）
+        combined_sum = sum(combined)
+        raw_orm_sign = 1.0 if float(orm_full_scores[i].item()) > 0.0 else -1.0
+        sum_sign_agree_flags.append(1.0 if (combined_sum * raw_orm_sign) > 0 else 0.0)
+
+        # PRM 标注在正/负轨迹中的“多数派”一致性
+        flags_i = _align_flags(step_flags[i] if i < len(step_flags) else [], K, is_success=True)
+        n_g = sum(1 for f in flags_i if f)
+        n_b = K - n_g
+        if raw_orm_sign > 0:
+            pos_cnt += 1
+            if n_g > n_b:
+                pos_major_good += 1
+        else:
+            neg_cnt += 1
+            if n_b >= n_g:
+                neg_major_bad += 1
+
+        combined_rewards.append(combined)
+
+    # === Decouple 统计指标 ===
+    # 1) PRM/ORM 标准化后分布的 mean/std
+    if len(flat_attr_vals) == 0:
+        attr_mean, attr_std = 0.0, 0.0
+    else:
+        t_attr = torch.tensor(flat_attr_vals, dtype=torch.float32)
+        attr_mean = float(t_attr.mean().item())
+        attr_std  = float(t_attr.std(unbiased=False).item())
+
+    if len(out_vals) == 0:
+        out_mean, out_std = 0.0, 0.0
+    else:
+        t_out = torch.tensor(out_vals, dtype=torch.float32)
+        out_mean = float(t_out.mean().item())
+        out_std  = float(t_out.std(unbiased=False).item())
+
+    # 2) outcome_share_last_mean：|ORM(最后一步)| / (|ORM(最后一步)| + α * Σ|PRM_std|)
+    shares = []
+    for a_abs, o_last in zip(per_traj_attr_abs_sum, per_traj_out_last_abs):
+        denom = o_last + a_abs + 1e-12
+        shares.append(float(o_last / denom))
+    outcome_share_last_mean = float(sum(shares) / max(1, len(shares)))
+
+    # 3) alpha_effective：α * Σ|PRM_std| / (Σ|ORM|)，按轨迹求比再做均值
+    alpha_ratios = []
+    for a_abs, o_abs, i in zip(per_traj_attr_abs_sum, per_traj_out_abs_sum, range(len(per_traj_out_abs_sum))):
+        denom = o_abs + 1e-12
+        alpha_ratios.append(float(a_abs / denom))
+    alpha_effective = float(sum(alpha_ratios) / max(1, len(alpha_ratios)))
+
+    # 4) ∑(combined_step_reward) 与 原始 ORM 符号一致的比例
+    sum_step_reward_sign_agree = float(sum(sum_sign_agree_flags) / max(1, len(sum_sign_agree_flags)))
+
+    # 5) PRM 标注与 ORM 的“全局一致性”（多数派）
+    pos_rate = float(pos_major_good / max(1, pos_cnt))
+    neg_rate = float(neg_major_bad  / max(1, neg_cnt))
+
+    decouple_stats = {
+        "prm/decouple/attr_mean": attr_mean,
+        "prm/decouple/attr_std": attr_std,
+        "prm/decouple/out_mean": out_mean,
+        "prm/decouple/out_std": out_std,
+        "prm/decouple/outcome_share_last_mean": outcome_share_last_mean,
+        "prm/decouple/alpha_effective": alpha_effective,
+        "prm/decouple/sum_step_reward_sign_agree": sum_step_reward_sign_agree,
+        "prm/decouple/pos_traj_prm_good_majority_rate": pos_rate,
+        "prm/decouple/neg_traj_prm_bad_majority_rate": neg_rate,
+    }
+
+    # 注意：返回 (rewards, stats) 二元组（仅 decouple 如此），其余方案仍然只返回 rewards
+    return combined_rewards, decouple_stats
 # =========================
 # Step → Token broadcast + suffix-sum
 # =========================
@@ -614,6 +711,7 @@ def compute_prm_grpo_advantages(
     orm_scores = torch.where(orm_sum > 0, torch.ones_like(orm_sum), -torch.ones_like(orm_sum)).to(dtype=torch.float32)
 
     # ---- 4. 方案选择阶段：根据scheme选择具体的奖励构造方案 ----
+    extra_metrics = {}
     scheme = (scheme or "allocation_c").lower()
     if scheme == "fix":
         # 方案1：fix —— 固定基数奖励构造 + 轨迹最后step的ORM符号调整
@@ -626,7 +724,7 @@ def compute_prm_grpo_advantages(
         step_rewards = _build_allocation_c(orm_scores, step_flags, step_ids, group_ids, hyper)
     elif scheme == "decouple":
         # 方案4：decouple —— PRM和ORM分别标准化后组合
-        step_rewards = _build_decouple(orm_scores, step_flags, step_ids, group_ids, hyper,)
+        step_rewards, extra_metrics = _build_decouple(orm_scores, step_flags, step_ids, group_ids, hyper,)
     else:
         raise ValueError(f"Unknown PRM scheme: {scheme} (expected one of: fix | allocation | allocation_c | decouple)")
 
@@ -641,4 +739,5 @@ def compute_prm_grpo_advantages(
     return {
         "advantages": advantages,        # (B, L_resp) token-level优势值
         "orm_scores": orm_scores,         # (B,) 逐条轨迹的 ±1
+        "metrics":  extra_metrics,      # ✅ 仅 decouple 会有
     }
