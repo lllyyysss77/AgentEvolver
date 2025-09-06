@@ -428,26 +428,43 @@ async def evaluate_step_flags_parallel(tokenizer, batch, overall_score_source: s
 
         # mask 与 overall_score 维持原逻辑
         sample_mask = response_mask[sample_idx]
+        advantage = _get_overall_advantage(batch.batch["advantages"][sample_idx], sample_mask)
+        orm_reward = batch.batch["token_level_rewards"][sample_idx].sum().item()
         if overall_score_source == "token_level_rewards":
             # PRM-GRPO 模式：使用原始 ORM 奖励
             # shuchang 0904：reward 0,1 映射为-1,1
-            orm_sum = batch.batch["token_level_rewards"][sample_idx].sum().item()
-            orm_scores = 1.0 if orm_sum > 0 else -1.0
+            orm_scores = 1.0 if orm_reward > 0 else -1.0
             overall_score = orm_scores
         elif overall_score_source == "advantages":
             # SSA 模式：使用计算后的 advantage
-            overall_score = _get_overall_advantage(batch.batch["advantages"][sample_idx], sample_mask)
-        # shuchang: 0904
-        # FIXME: 只跳过 advantage 非常小的样本 或 全部为负的样本
-        if skip_type == "skip_small_adv":
-            skip_part = _get_overall_advantage(batch.batch["advantages"][sample_idx], sample_mask)
-        elif skip_type == "skip_all_neg":
-            skip_part = batch.batch["token_level_rewards"][sample_idx].sum().item()
+            overall_score = advantage
         else:
-            skip_part = 1.0  # 不跳过
-        if abs(skip_part) < 1e-8:
-            print(f"[parallel_eval] Sample {sample_idx}: advantage≈0 ({overall_score:.6f}), skipping evaluation, returning all GOOD")
-            flags_per_sample[sample_idx] = [True] * len(steps_struct)
+            overall_score = orm_scores
+        # shuchang: 0906
+        # 只跳过 advantage 非常小的样本 或 全部为负的样本
+        # 决定是否应该跳过当前样本
+        should_skip = False
+        skip_reason = ""
+        
+        if skip_type == "skip_small_adv":
+            # 1. 只跳过 advantage 非常小的样本
+            if abs(advantage) < 1e-8:
+                should_skip = True
+                skip_reason = f"advantage≈0 ({advantage:.6f})"
+        
+        elif skip_type == "skip_all_neg":
+            # 2. 跳过 orm_reward 为负或零的样本
+            # 注意：orm_reward > 0 才是正样本，所以 <= 0 都属于“负”的范畴
+            if orm_reward <= 0:
+                should_skip = True
+                skip_reason = f"orm_reward is not positive ({orm_reward:.6f})"
+
+        # 如果满足任一跳过条件，则执行跳过逻辑
+        if should_skip:
+            print(f"[parallel_eval] Sample {sample_idx}: Skipping evaluation due to {skip_reason}. Assigning flags based on overall_score.")
+            # 根据 overall_score 的正负来决定 flag 的值
+            flag_value = overall_score > 0
+            flags_per_sample[sample_idx] = [flag_value] * len(steps_struct)
 
             if save_dir:
                 record = EvaluationRecord(
