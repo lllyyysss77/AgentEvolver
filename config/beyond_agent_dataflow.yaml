@@ -41,8 +41,6 @@ actor_rollout_ref:
     max_env_len: 4096
     enable_request_id: False
     sparse: True
-    magnify_success: False
-    train_history_infer_token: True
 
     magnify_success: False
     train_history_infer_token: True
@@ -51,7 +49,7 @@ actor_rollout_ref:
     
 
 thread_pool:
-  max_workers: 5
+  max_workers: 8
 
 env_service:
   env_type: "appworld"
