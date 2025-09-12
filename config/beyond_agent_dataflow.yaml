@@ -129,12 +129,11 @@ attribution_driven_credit_assignment:
   consistent_scale: 1.0             # 一致步骤缩放因子
   pos_unconsistent_scale: 0.2       # 不一致步骤缩放因子
   neg_unconsistent_scale: -0.2      # 不一致步骤负面缩放因子
-  concurrent: 20                    # 并发处理数量
-  model: "qwen-max"                 # 语义评估使用的模型
+  concurrent: 5                    # 并发处理数量
+  model: "qwen-plus"                 # 语义评估使用的模型
   api_max_retries: 200              # API调用最大重试次数，默认200次
   llm_evaluation_log_dir: null      # 设置为具体路径来启用，例如："/path/to/llm_evaluation_logs"
   adca_grpo:
-    enable_adca_grpo: false
     prm_scheme: "decouple"          # allocation | decouple
     do_batch_norm: true
     equal_trajectory_weight: true
