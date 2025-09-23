@@ -33,33 +33,39 @@ RUN /opt/conda/bin/conda init bash
 RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 
-WORKDIR /agentscope_runtime
+WORKDIR /BeyondAgent
 
 RUN conda create -n bfcl python=3.11.13 -y
 
-COPY src/agentscope_runtime/sandbox/box/training_box/ ./training_box/
+COPY env_service/ ./env_service/
 RUN apt-get install gcc python3-dev -y
 
+# 克隆 gorilla 仓库
 RUN git clone https://github.com/ShishirPatil/gorilla.git
-RUN conda run -n bfcl pip install -r ./gorilla/berkeley-function-call-leaderboard/.
-RUN pip install -r ./training_box/environments/bfcl/requirements.txt
 
-RUN cp -r ./gorilla/berkeley-function-call-leaderboard/bfcl_eval/data ./training_box/bfcl
+# 安装依赖
+RUN conda run -n bfcl pip install -e ./gorilla/berkeley-function-call-leaderboard/. && \
+    conda run -n bfcl pip install -r ./env_service/environments/bfcl/requirements.txt
 
-RUN cd training_box
+# 准备数据
+RUN cp -r ./gorilla/berkeley-function-call-leaderboard/bfcl_eval/data ./env_service/environments/bfcl/bfcl_eval
 
-RUN python ./environments/bfcl/bfcl_dataprocess.py
+# 切换到脚本目录并处理数据
+WORKDIR /BeyondAgent/env_service/environments/bfcl
+RUN python bfcl_dataprocess.py
 
-ENV PYTHONPATH=/agentscope_runtime:$PYTHONPATH
-ENV ENV_PATH=/agentscope_runtime/training_box
-ENV BFCL_DATA_PATH=$ENV_PATH/bfcl/multiturn_dataset/multi_turn_base_processed.jsonl
-ENV BFCL_SPLID_ID_PATH=$ENV_PATH/bfcl/multiturn_dataset/multi_turn_base_split_ids.json
+# 设置环境变量
+ENV PYTHONPATH=/BeyondAgent:$PYTHONPATH
+ENV ENV_PATH=/BeyondAgent/env_service/environments/bfcl
+ENV BFCL_DATA_PATH=$ENV_PATH/bfcl_data/multi_turn_base_processed.jsonl
+ENV BFCL_SPLID_ID_PATH=$ENV_PATH/bfcl_data/multi_turn_base_split_ids.json
+ENV BFCL_ANSWER_PATH=$ENV_PATH/bfcl_eval/possible_answer
 
 ENV OPENAI_API_KEY=$OPENAI_API_KEY
 
-WORKDIR /agentscope_runtime
+WORKDIR /BeyondAgent
 
 CMD . /opt/conda/etc/profile.d/conda.sh && \
     conda activate bfcl && \
-    cd /agentscope_runtime/training_box && \
+    cd /BeyondAgent/env_service/launch_script && \
     exec bash bfcl.sh

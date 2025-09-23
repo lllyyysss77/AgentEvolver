@@ -157,7 +157,7 @@ def bfcl_task_preprocess(
 
 if __name__ == "__main__":
 
-    test_categories_list=["all","all_scoring","multi_turn","single_turn","live","non_live","non_python","python"]
+    test_categories_list=["all","all_scoring","multi_turn","single_turn","live","non_live","non_python","python","multi_turn_base"]
 
 
     for test_categories in test_categories_list:
@@ -165,7 +165,7 @@ if __name__ == "__main__":
         result = bfcl_task_preprocess(
             test_categories=[test_categories],
             train_ratio=0.5,
-            output_dir="./bfcl/multiturn_dataset",
+            output_dir="./bfcl_data",
         )
 
         print("-" * 50)

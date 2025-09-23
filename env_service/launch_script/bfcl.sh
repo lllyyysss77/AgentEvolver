@@ -6,11 +6,46 @@
 
 # 环境变量（请改成实际路径）
 
+#
+# 获取 launch_script 的目录
+LAUNCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-export ENV_PATH=/mnt/data/yunpeng.zyp/code/beyondagent/workspace/EnvService
-export BFCL_DATA_PATH=$ENV_PATH/bfcl/multiturn_dataset/multi_turn_base_processed.jsonl
-export BFCL_SPLID_ID_PATH=$ENV_PATH/bfcl/multiturn_dataset/multi_turn_base_split_ids.json
-export BFCL_ANSWER_PATH=$ENV_PATH/bfcl/data/possible_answer
+# 获取 env_service 的目录
+ENV_SERVICE_DIR="$(dirname "$LAUNCH_SCRIPT_DIR")"
+
+# 获取 bfcl 环境的目录
+BFCL_ENV_DIR="$ENV_SERVICE_DIR/environments/bfcl"
+
+export ENV_PATH="$BFCL_ENV_DIR"
+export BFCL_DATA_PATH="$BFCL_ENV_DIR/bfcl_data/multi_turn_base_processed.jsonl"
+export BFCL_SPLID_ID_PATH="$BFCL_ENV_DIR/bfcl_data/multi_turn_base_split_ids.json"
+export BFCL_ANSWER_PATH="$BFCL_ENV_DIR/bfcl_eval/possible_answer"
+
+echo "🌍 环境变量设置完成:"
+echo "ENV_PATH: $ENV_PATH"
+echo "BFCL_DATA_PATH: $BFCL_DATA_PATH"
+echo "BFCL_SPLID_ID_PATH: $BFCL_SPLID_ID_PATH"
+echo "BFCL_ANSWER_PATH: $BFCL_ANSWER_PATH"
+
+# 检查文件是否存在
+if [ -f "$BFCL_DATA_PATH" ]; then
+    echo "✅ 数据文件存在: $BFCL_DATA_PATH"
+else
+    echo "❌ 数据文件不存在: $BFCL_DATA_PATH"
+fi
+
+if [ -f "$BFCL_SPLID_ID_PATH" ]; then
+    echo "✅ 分割ID文件存在: $BFCL_SPLID_ID_PATH"
+else
+    echo "❌ 分割ID文件不存在: $BFCL_SPLID_ID_PATH"
+fi
+
+if [ -d "$BFCL_ANSWER_PATH" ]; then
+    echo "✅ 答案文件夹存在: $BFCL_ANSWER_PATH"
+else
+    echo "❌ 答案文件夹不存在: $BFCL_ANSWER_PATH"
+fi
+
 export OPENAI_API_KEY=xx
 
 # only for multinode running

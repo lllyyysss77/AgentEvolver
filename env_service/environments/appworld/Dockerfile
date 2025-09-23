@@ -38,12 +38,12 @@ WORKDIR /BeyondAgent
 RUN conda create -n appworld python=3.11.0 -y && \
     conda install -n appworld -y libcst
 
-COPY external/envservice/ ./envservice/
+COPY env_service/ ./env_service/
 
-RUN ls -l ./envservice/environments/appworld
+RUN ls -l ./env_service/environments/appworld
 RUN apt-get install gcc python3-dev -y
 
-RUN conda run -n appworld pip install -r ./envservice/environments/appworld/requirements.txt
+RUN conda run -n appworld pip install -r ./env_service/environments/appworld/requirements.txt
 
 RUN mkdir appworld && cd appworld
 
@@ -71,5 +71,5 @@ WORKDIR /BeyondAgent
 
 CMD . /opt/conda/etc/profile.d/conda.sh && \
     conda activate appworld && \
-    cd /BeyondAgent/envservice/ && \
+    cd /BeyondAgent/env_service/ && \
     exec bash appworld.sh

@@ -741,6 +741,12 @@ if __name__ == "__main__":
         default=8000,
         help="Port to run the server on",
     )
+    parser.add_argument(
+        "--debug",
+        type=bool,
+        default=True,
+        help="debug mode or not",
+    )
     args = parser.parse_args()
 
     env_class = import_and_register_env(args.env, args.env_file_name)
@@ -749,4 +755,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print(f"Starting server on {args.portal}:{args.port}")
-    uvicorn.run(app, host=args.portal, port=args.port)
+
+    if args.debug:
+        uvicorn.run(app, host=args.portal, port=args.port)
+    else:
+        uvicorn.run(app, host=args.portal, port=args.port,log_level="error" )

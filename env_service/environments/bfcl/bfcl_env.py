@@ -22,16 +22,16 @@ from typing import Any, Dict, List
 import re
 import uuid
 
-from training_box.base import BaseEnv
-from training_box.registry import Registry
-from training_box.src.trajectory import StateMessage, ActionMessage, ToolCall
+from env_service.base import BaseEnv
+from env_service.registry import Registry
+from env_service.trajectory import StateMessage, ActionMessage, ToolCall
 
 
-from training_box.environments.bfcl.env_handler import EnvHandler
+from env_service.environments.bfcl.env_handler import EnvHandler
 
 # 默认路径，可用环境变量覆盖
-os.environ.setdefault("BFCL_DATA_PATH", "./bfcl/multiturn_dataset/multiturn_data.jsonl")
-os.environ.setdefault("BFCL_ANSWER_PATH", "./bfcl/data/possible_answer")
+os.environ.setdefault("BFCL_DATA_PATH", "./bfcl_data/multiturn_data.jsonl")
+os.environ.setdefault("BFCL_ANSWER_PATH", "./bfcl_eval/possible_answer")
 
 __all__ = ["BfclEnv"]
 
