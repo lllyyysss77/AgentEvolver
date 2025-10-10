@@ -269,7 +269,7 @@ class ParallelEnvManager(object):
                     enable_agent_terminate = False
                 else:
                     # TODO: a better way to detect the type of task (openworld or not).
-                    # All original tasks are close world, and all synthetic tasks are open world.
+                    # All original tasks are closed, and all synthetic tasks are open.
                     # Agent is allowed to terminate the conversation in open world.
                     if 'env' in task.evaluator:
                         enable_agent_terminate = False
