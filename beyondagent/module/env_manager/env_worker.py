@@ -3,7 +3,7 @@ import uuid
 
 from omegaconf import DictConfig
 from loguru import logger
-from beyondagent.client.env_client import EnvClient, EnvClientWrapper
+from beyondagent.client.env_client import EnvClient
 from beyondagent.module.agent_flow.base_agent_flow import BaseAgentFlow
 from beyondagent.schema.task import Task
 from beyondagent.schema.trajectory import Trajectory
@@ -29,7 +29,8 @@ class EnvWorker(object):
             config (DictConfig, optional): The configuration settings for the environment and other components.
         """
         self.config = config  # Store the provided configuration
-        self.env = EnvClientWrapper(base_url=config.env_service.env_url,is_open_query=is_open_query)  # Initialize the environment client
+        self.env = EnvClient(base_url=config.env_service.env_url)  # Initialize the environment client
+        self.is_open_query=is_open_query
         self.task = task  # Store the task object
         self.env_type: str = task.env_type  # Set the environment type based on the task
         self.task_id: str = task.task_id  # Set the task ID
@@ -59,7 +60,8 @@ class EnvWorker(object):
         try:
             init_response = self.env.create_instance(env_type=self.env_type,
                                                     task_id=self.task_id,
-                                                    instance_id=self.instance_id)
+                                                    instance_id=self.instance_id,
+                                                    params={'is_open_query': self.is_open_query})
 
             init_messages: list[dict] = init_response["state"]
             assert isinstance(init_messages, list) and len(init_messages)==2, "init_messages must be list and its length must be 2"

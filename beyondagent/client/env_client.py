@@ -172,20 +172,6 @@ class EnvClient:
         return response["success"]
 
 
-class EnvClientWrapper(EnvClient):
-    """This is a wrapper of envclient to patch some env, making them behave normally in open query, e.g. synthetic query.
-    """
-    def __init__(self, base_url: str = "http://localhost:8000", is_open_query: bool = False):
-        super().__init__(base_url)
-        self._is_open_query=is_open_query
-    
-    def step(self, instance_id: str, action: Dict = {}, params: Dict = {}) -> Dict:
-        default_query={'bfcl_single_turn': True}
-        if self._is_open_query:
-            default_query|=params
-        return super().step(instance_id, action, default_query)
-
-
 def main():
     """
     Demonstrates the use of EnvClient by performing a sequence of operations:

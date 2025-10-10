@@ -295,7 +295,7 @@ class BfclEnv(BaseEnv):
         # state_msg: role=<Role.USER: 'user'> content='' reasoning_content='' tool_calls=[ToolCall(...)] timestamp='2025-xxx' metadata={} tool_call_id=''
         terminated = self._is_terminated(state_msg.simple_dict["content"]) # change by czy0721
         # if new query is ready to be sent but single_turn is True
-        if cur_turn!=self.current_turn and (params and params.get('bfcl_single_turn',False)==True):
+        if cur_turn!=self.current_turn and (self.params.get('is_open_query',False)==True):
             # terminate the trajectory
             terminated=True
         reward = self.evaluate(params={"sparse": True}) if terminated else 0.0
