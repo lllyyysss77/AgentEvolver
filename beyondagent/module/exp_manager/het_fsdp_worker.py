@@ -875,6 +875,8 @@ class HETActorRolloutRefWorker(Worker):
 
         if self._is_offload_param:
             offload_fsdp_model_to_cpu(self.actor_module_fsdp)  # ⭐ Offloads the FSDP model to CPU if offloading is enabled
+    
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def load_checkpoint(self, local_path, hdfs_path=None, del_local_after_load=False):
         """
         Loads a model checkpoint from a local or HDFS path. This method is designed to be used by Actor or standalone Rollout Workers.
