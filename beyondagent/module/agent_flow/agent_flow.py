@@ -142,8 +142,6 @@ class AgentFlow(BaseAgentFlow):
                 self.cmt.discarded = True
                 break
 
-            # TODO 这个在新代码里删掉了？
-            # trajectory.steps.append(llm_output)
             # 6. 💾 save llm output
             self.cmt.save_llm_output(llm_output, input_msg_ref=step_input_message_arr)  # ⭐ Save the LLM output
             tmux['token'][thread_index] += self.cmt.generated_token_cnt

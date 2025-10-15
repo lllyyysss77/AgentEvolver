@@ -69,7 +69,7 @@ if "kl_control" in os.environ.get("DEBUG_ARG",""):
             raise NotImplementedError
         
         assert res.dim() == 2, f"kl_penalty should be 2-dim tensor, but got {res.dim()}-dim tensor"
-        # 对 kl 进行权重控制，前重后轻
+        # control the kl penalty by the length. frontier tokens have higher penalty.
         import beyondagent.utils.utils as ut
         lengths=(res!=0).int().sum(dim=-1)
         weights=ut.get_batched_exponential_decay_weights_vectorized(lengths.tolist())

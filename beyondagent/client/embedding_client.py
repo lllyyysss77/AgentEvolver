@@ -89,7 +89,7 @@ class OpenAIEmbeddingClient:
             "Authorization": f"Bearer {self.api_key}"  # ⭐ Constructs the authorization header using the provided API key
         }
         
-        logger.info(f"初始化OpenAI Embedding客户端，限流: {rate_limit_calls}次/{rate_limit_window}秒")
+        logger.info(f"init OpenAI Embedding client, quota: {rate_limit_calls} times/{rate_limit_window}s")
 
     def get_embeddings(self, texts: Union[str, Sequence[str]], 
                       model: Optional[str] = None,
@@ -118,7 +118,7 @@ class OpenAIEmbeddingClient:
         
         # Parameter validation
         if not texts:
-            raise ValueError("texts不能为空")
+            raise ValueError("texts cannot be empty")
         
         # Construct the request payload
         payload = {
@@ -144,14 +144,14 @@ class OpenAIEmbeddingClient:
                 timeout=30
             )
             if not response.ok:
-                logger.error(f"请求失败: {response.status_code} {response.reason}")
-                logger.error(f"失败json: {response.json()}")
+                logger.error(f"failed to request embedding: {response.status_code} {response.reason}")
+                logger.error(f"err json: {response.json()}")
                 response.raise_for_status()
             
             return response.json()
             
         except requests.RequestException as e:
-            raise requests.RequestException(f"请求失败: {e}")
+            raise requests.RequestException(f"failed to request embedding: {e}")
 
     def get_single_embedding(self, text: str, **kwargs) -> List[float]:
         """
@@ -218,19 +218,19 @@ class OpenAIEmbeddingClient:
             time_window (int): The time window in seconds. Default is 60 seconds.
         """
         self.rate_limiter = RateLimiter(max_calls, time_window)  # ⭐ Initialize the rate limiter
-        logger.info(f"更新限流设置: {max_calls}次/{time_window}秒")
+        logger.info(f"update rate limiter: {max_calls} times/{time_window}s")
 
-# 使用示例
+# demo
 if __name__ == "__main__":
     import threading
     import concurrent.futures
     
-    # 初始化客户端，设置每分钟最多10次请求
+    # init client, set max calls per minute
     client = OpenAIEmbeddingClient(
         api_key=os.environ.get('OPENAI_API_KEY', 'test-key'),
         base_url='https://dashscope.aliyuncs.com/compatible-mode/v1',
         model_name="text-embedding-v4",
-        rate_limit_calls=10,  # 每分钟10次
+        rate_limit_calls=10,  # 10 calls per minute
         rate_limit_window=60
     )
 
@@ -249,33 +249,31 @@ if __name__ == "__main__":
             start_time = time.time()
             embedding = client.get_single_embedding(f"{text} - Thread {thread_id}")  # ⭐ Retrieve the embedding for the provided text
             end_time = time.time()
-            print(f"线程 {thread_id}: 成功获取embedding，耗时 {end_time - start_time:.2f}秒，维度: {len(embedding)}")
+            print(f"thread {thread_id}: recv embedding, time {end_time - start_time:.2f}s, #dim: {len(embedding)}")
             return True
         except Exception as e:
-            print(f"线程 {thread_id}: 错误 - {e}")
+            print(f"thread {thread_id} error: {e}")
             return False
     
     try:
-        print("=== 单线程测试 ===")
-        # 单线程测试
+        print("=== single thread test ===")
         for i in range(3):
             start_time = time.time()
             embedding = client.get_single_embedding(f"Test text {i}")  # ⭐ Retrieve the embedding for the test text
             end_time = time.time()
-            print(f"请求 {i+1}: 完成，耗时 {end_time - start_time:.2f}秒")
+            print(f"thread {i+1}: recv embedding, time {end_time - start_time:.2f}s, #dim: {len(embedding)}")
         
-        print("\n=== 多线程测试 ===")
-        # 多线程测试
+        print("\n=== multi thread test ===")
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             futures = []
-            for i in range(8):  # 提交8个任务，超过限流数量
+            for i in range(8):  # submit 8 tasks, which exceeds the rate limit
                 future = executor.submit(test_embedding, i+1, "Hello world")  # ⭐ Submit tasks to the thread pool
                 futures.append(future)
             
-            # 等待所有任务完成
+            # wait for all tasks to complete
             results = [future.result() for future in concurrent.futures.as_completed(futures)]  # ⭐ Collect results from all completed futures
             successful_count = sum(results)
-            print(f"多线程测试完成，成功: {successful_count}/{len(results)}")
+            print(f"finished multi-thread test: {successful_count}/{len(results)}")
         
     except Exception as e:
-        print(f"测试过程中出现错误: {e}")
+        print(f"failed test: {e}")

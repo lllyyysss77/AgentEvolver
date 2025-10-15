@@ -52,7 +52,7 @@ class AvgJudge(RewardCalculator):
                 logger.error(f"Judge failed: {e}")
                 return 0.0
 
-        # 并发执行
+        # run judges in parallel
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(worker, j) for j in self._judges]
             for f in as_completed(futures):

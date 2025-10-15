@@ -69,7 +69,7 @@ class LlmFilter(TaskPostFilter):
         # return self._filter_with_batches(tasks)
 
     def _filter_with_threadpool(self, tasks: Sequence[TaskObjective]) -> list[TaskObjective]:
-        """使用线程池并行处理所有任务"""
+        """use thread pool to handle tasks parallelly"""
         from tqdm import tqdm
         res = []
         

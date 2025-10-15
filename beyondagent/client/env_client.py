@@ -186,11 +186,11 @@ def main():
     client = EnvClient()
 
     env_type = "appworld"
-    # 获取任务列表
+    # get the task list
     task_ids = client.get_env_profile(env_type)  # ⭐ Retrieve the list of available tasks for the specified environment type
     print(f"Available tasks: {task_ids}")
 
-    # 创建实例
+    # init instance
     task_id = task_ids[0]
     init_response = client.create_instance(env_type, task_id)  # ⭐ Create an instance using the first available task
     print("init state", init_response)
@@ -198,16 +198,16 @@ def main():
     query = init_response["state"]
     print(f"Created instance {instance_id} with query: {query}")
 
-    # 执行动作
+    # act
     action = {"role": "assistant", "content": "print('hello appworld!!')"}
     result = client.step(instance_id, action)  # ⭐ Execute an action within the created instance
     print(f"Step result: {result}")
 
-    # 评估
+    # evaluate
     score = client.evaluate(instance_id)  # ⭐ Evaluate the current state of the instance
     print(f"Evaluation score: {score}")
 
-    # 释放实例
+    # release instance
     success = client.release_instance(instance_id)  # ⭐ Release the instance, freeing up resources
     print(f"Instance released: {success}")
 

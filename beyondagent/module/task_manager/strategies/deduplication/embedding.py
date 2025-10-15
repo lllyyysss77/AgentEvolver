@@ -152,7 +152,7 @@ class EmbeddingClient:
             return False
     
     def clear(self):
-        """清空所有存储的文本和嵌入向量"""
+        """clear all stored texts and embeddings"""
         try:
             self._chroma_client.delete_collection(self._collection.name)
             self._collection = self._chroma_client.get_or_create_collection(
@@ -163,14 +163,14 @@ class EmbeddingClient:
             self._id_mapping.clear()
             self._reverse_id_mapping.clear()
         except Exception as e:
-            print(f"清空集合时出错: {e}")
+            print(f"failed to clear stores: {e}")
     
     def size(self) -> int:
-        """返回已存储的文本数量"""
+        """get the number of stored texts"""
         return self._collection.count()
     
     def get_collection_info(self) -> dict:
-        """获取ChromaDB集合信息"""
+        """get the collection info of ChromaDB"""
         return {
             "name": self._collection.name,
             "count": self._collection.count(),
@@ -180,19 +180,19 @@ class EmbeddingClient:
 
 def pack_trajectory(trajectory: Trajectory) -> str:
     """
-    将轨迹打包成字符串
+    pack the trajectory into a string
     
     Args:
-        trajectory (Trajectory): 轨迹对象
+        trajectory (Trajectory): the trajectory
         
     Returns:
-        str: 打包后的字符串
+        str: packed trajectory
     """
     res = ""
     for message in trajectory.steps:
         res += f"{message['role']}\n{message['content']}\n\n"
     
-    return res[-MAX_INPUT_LEN:] # TODO: text-embedding-v4 最大长度
+    return res[-MAX_INPUT_LEN:] # TODO: text-embedding-v4 max length
 
 
 class StateRecorder:
@@ -208,12 +208,12 @@ class StateRecorder:
     
     def add_state(self, trajectory: Trajectory, action: str, observation: str):
         """
-        添加状态记录
+        add state record
         
         Args:
-            trajectory (Trajectory): 轨迹
-            action (str): 动作
-            observation (str): 观察结果
+            trajectory (Trajectory): trajectory
+            action (str): action
+            observation (str): observation
         """
         key = pack_trajectory(trajectory)
         id = self._client.find_by_text(key)
@@ -227,13 +227,13 @@ class StateRecorder:
     
     def get_state(self, trajectory: Trajectory) -> list[tuple[str, str]]:
         """
-        获取状态记录
+        get the state record
         
         Args:
-            trajectory (Trajectory): 轨迹
+            trajectory (Trajectory): trajectory
             
         Returns:
-            list[tuple[str, str]]: 动作和观察结果的列表
+            list[tuple[str, str]]: list of (action, observation)
         """
         key = pack_trajectory(trajectory)
         id = self._client.find_by_text(key)
@@ -245,14 +245,14 @@ class StateRecorder:
     
     def get_similar_states(self, trajectory: Trajectory, k: int = 5) -> list[tuple[int, float, list[tuple[str, str]]]]:
         """
-        获取相似的状态记录
+        get the similar state records
         
         Args:
-            trajectory (Trajectory): 轨迹
-            k (int): 返回数量
+            trajectory (Trajectory): trajectory
+            k (int): top k
             
         Returns:
-            list[tuple[int, float, list[tuple[str, str]]]]: (ID, 相似度, 动作观察列表) 的列表
+            list[tuple[int, float, list[tuple[str, str]]]]: list, (ID, similarity, list of (action, observation))
         """
         key = pack_trajectory(trajectory)
         similar_results = self._client.find_top_k_by_text(key, k)
@@ -266,23 +266,23 @@ class StateRecorder:
 
     
     def clear(self):
-        """清空所有记录"""
+        """clear all records"""
         self._mp.clear()
         self._client.clear()
         self._idx = 0
 
 
-# 使用示例
+# demo
 if __name__ == "__main__":
-    # 需要先安装chromadb: pip install chromadb
+    # install chromadb first: pip install chromadb
     
-    # 初始化StateRecorder
+    # init StateRecorder
     recorder = StateRecorder(
         similarity_threshold=0.8,
         chroma_db_path="./my_chroma_db",
         collection_name="trajectory_states"
     )
     
-    print("ChromaDB向量数据库已初始化")
+    print("inited ChromaDB")
     
     

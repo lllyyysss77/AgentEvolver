@@ -206,7 +206,7 @@ def compute_grpo_outcome_advantage(
             else:
                 scores[i] = scores[i] - id2mean[index[i]]
                 # no std
-                # 假设 llm judge 对于不易区分的 sample 会输出方差极小的 reward，我们采取 batch std 来动态降低其权重
+                # if llm judge output similar rewards for undistinguishable samples, we may want to reduce its weight according to the batch std
                 # scores[i] = scores[i] / (batch_std + epsilon)
         scores = scores.unsqueeze(-1) * response_mask
 
@@ -606,7 +606,7 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
 
         config = self.config.attribution_driven_credit_assignment
 
-        # 设置默认的API重试次数
+        # set the default api_max_retries
         if not hasattr(config, 'api_max_retries'):
             config.api_max_retries = 200  # ⭐ Set the default number of API retries to 200
             print(f"[attribution_config] Using default api_max_retries: {config.api_max_retries}")
@@ -1157,7 +1157,8 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
 
                     batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object)  # ⭐ Generate unique UIDs for each item in the batch
 
-                    # 在新的代码中，data rollout 后产生了一些新的 extra，这些 extra 应当和原始 extra 合并
+                    # in the new code, the rollout process generates new extras, which should be merged with the original extra.
+                    # by now, they are stored seperately.
                     # assert len(gen_batch_output.non_tensor_batch["extras"].keys()&batch_extras.keys())==0, "extra of extra should not overlap with existing extra...how funny..."
                     batch.non_tensor_batch['original_extras']=batch_extras  # ⭐ Store original extras before scaling
                     batch = union_gen_batch_via_task_id(tasks, batch, gen_batch_output)  # ⭐ Merge generated batch with the current batch
@@ -1277,7 +1278,7 @@ class BeyondAgentRayPPOTrainer(RayPPOTrainer):
                                 print("DEBUG: change norm_adv_by_std_in_grpo from True to False, using batch std!")
                             norm_adv_by_std_in_grpo = False
 
-                        # 走原 compute_advantage 流程（保持兼容）
+                        # call the original compute_advantage for compatibility
                         norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)
 
                         batch = compute_advantage(

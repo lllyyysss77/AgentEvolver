@@ -17,7 +17,7 @@ class LlmException(Exception):
         
 
 class DashScopeClient:
-    """阿里云百炼API客户端"""
+    """Aliyun DashScope API Client"""
     
     def __init__(self, api_key: Optional[str] = None, model_name: str = "qwen-plus", 
                  temperature: float = 0.7, max_tokens: int = 2048):
@@ -176,7 +176,7 @@ class DashScopeClient:
             if line:
                 line = line.decode('utf-8')
                 if line.startswith('data: '):
-                    data = line[6:]  # 移除 'data: ' 前缀
+                    data = line[6:]  # remove the prefix 'data: '
                     if data == '[DONE]':
                         break
                     
@@ -189,7 +189,7 @@ class DashScopeClient:
                                 if content:
                                     yield content  # ⭐ Yield the content if it meets the conditions
                     except json.JSONDecodeError:
-                        continue  # 跳过无法解析的行
+                        continue  # skip the bad line
 
     def chat_with_retry(self, messages: list[dict[str, str]], max_retries: int = 3, 
                        retry_delay: float = 1.0, **kwargs) -> str:
@@ -241,14 +241,14 @@ class DashScopeClient:
         for attempt in range(max_retries):
             try:
                 stream_generator = cast(Generator[str, None, None], self.chat_completion(messages, stream=True, **kwargs))  # ⭐ Cast the generator to the appropriate type
-                # 尝试获取第一个chunk来验证连接
+                # try to fetch the first chunk to verify the connection
                 first_chunk = next(stream_generator, None)
                 if first_chunk is not None:
                     yield first_chunk
-                    # 继续生成剩余内容
+                    # yield the rest chunks
                     for chunk in stream_generator:
                         yield chunk
-                    return  # 成功完成，退出重试循环
+                    return  # success
             except LlmException as e:
                 if e.typ=='inappropriate content':
                     logger.warning(f"llm return inappropriate content, which is blocked by the remote")
@@ -257,33 +257,30 @@ class DashScopeClient:
             except Exception as e:
                 logger.warning(f"Stream attempt {attempt + 1} failed: {e}")
                 
-            if attempt < max_retries - 1:  # 不是最后一次尝试
-                time.sleep(retry_delay * (2 ** attempt))  # 指数退避
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (2 ** attempt))
         
         logger.error(f"All {max_retries} stream attempts failed")
         
         return
 
 
-# 使用示例
+# demo
 if __name__ == "__main__":
     client = DashScopeClient(model_name='qwq-32b')
     
     messages = [
-        {"role": "user", "content": "写一首关于春天的诗"}
+        {"role": "user", "content": "Write a poem about Spring."}
     ]
     
-    # # 非流式调用
-    # print("=== 非流式响应 ===")
+    # print("=== request ===")
     # response = client.chat_completion(messages)
     # print(response)
     
-    print("\n=== 流式响应 ===")
-    # 流式调用
+    print("\n=== streaming ===")
     for chunk in client.chat_completion(messages, stream=True):
         print(chunk, end='', flush=True)
     
-    print("\n\n=== 带重试的流式响应 ===")
-    # 带重试的流式调用
+    print("\n\n=== streaming with retry ===")
     for chunk in client.chat_stream(messages, {}):
         print(chunk, end='', flush=True)

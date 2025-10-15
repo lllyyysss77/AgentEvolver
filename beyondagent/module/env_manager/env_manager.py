@@ -316,7 +316,7 @@ class ParallelEnvManager(object):
         stop = [False for _ in range(len(tasks) * rollout_n)]
 
         with ThreadPoolExecutor(max_workers=self.max_parallel) as executor:
-            # 2. 初始提交：将所有任务第一次提交到线程池
+            # 2. submit: submit all tasks to the thread pool
             for data_id, (task, task_train_exp_mode) in enumerate(zip(tasks, task_train_exp_modes)):
                 for rollout_id in range(rollout_n):
                     thread_index = data_id * rollout_n + rollout_id
@@ -328,40 +328,40 @@ class ParallelEnvManager(object):
             total_rollouts = len(future_to_params)
             pbar = tqdm(total=total_rollouts, desc=f"Epoch {epoch}: Collecting rollouts")
 
-            # 3. 动态处理循环：只要还有任务在执行，就持续循环
+            # 3. wait for all tasks to complete
             while future_to_params:
-                # as_completed 会在任何一个 future 完成时立即返回它
+                # if any future is done, process it
                 for future in as_completed(future_to_params):
-                    # 获取与这个完成的 future 相关的原始参数,从字典中移除
+                    # get the corresponding params, and remove it from the dict
                     params = future_to_params.pop(future)
                     self.step_status_printer(tmux) # cc: i dont know what this is
 
+                    # 4. get the results and handle errors
                     try:
-                        # 4. 健壮的结果获取与错误处理
                         result = future.result()  # ⭐ Retrieve the result from the completed future
 
-                        # 处理“软失败”（worker内部捕获错误并返回特殊标记）
+                        # if the result has metadata error, try to recover
                         if 'error' in result.metadata:
                             error_msg = result.metadata['error']
                             logger.warning(f"Task {params[1]}-{params[2]} failed with metadata error: {error_msg}. Retrying... \n Task: {params[0]}")
-                            # 由于大部分错误来自于网络和quota，此处强行等待
+                            # as most errors are internet error or quota, we wait before resubmit it
                             time.sleep(30)
-                            # 将任务重新提交,同时重制 tmux 和 stop
+                            # resubmit and reset tmux and stop
                             thread_index=params[4]
                             for k in tmux: tmux[k][thread_index] = 0
                             stop[thread_index]=False
                             new_future = executor.submit(self.rollout_env_worker, *params) # type: ignore
                             future_to_params[new_future] = params
-                            continue # 继续处理下一个完成的任务
+                            continue
 
-                        # 5. 成功处理
+                        # 5. if the task is successful, add it to the result list
                         traj_cmt_array.append(result)
-                        pbar.update(1) # 只有在真正成功时才更新进度条
+                        pbar.update(1) # update progress bar when success
 
                     except Exception as e:
-                        # 处理“硬失败”（worker中未捕获的异常）
+                        # handle the uncaught exception
                         logger.error(f"Task {params[1]}-{params[2]} raised an exception: {e}. Retrying... \n Task: {params[0]}")
-                        # 将任务重新提交,同时重制 tmux 和 stop
+                        # resubmit, and reset tmux and stop
                         thread_index=params[4]
                         for k in tmux: tmux[k][thread_index] = 0
                         stop[thread_index]=False
@@ -523,7 +523,7 @@ class ParallelEnvManager(object):
             resp_ids = sample.response_ids
             parse_result = parse_response_ids_to_steps(resp_ids, self.tokenizer)  # ⭐ Parse the response IDs into step IDs and texts
             step_ids_list.append(torch.tensor(parse_result.step_ids, dtype=torch.long))
-            # 生成steps结构（用于语义评估）
+            # generate steps_texts (for semantic evaluation)
             steps_texts_list.append([
                 {"action": s["action_text"], "observation": s["observation_text"]}
                 for s in parse_result.steps
@@ -625,7 +625,7 @@ class ParallelEnvManager(object):
                 "loss_mask": loss_mask,
                 "exp_mask": exp_mask,        # add exp_mask by ANNI
                 "step_ids": step_ids_pad,
-                "group_ids": group_ids,   # ★ 新增groupid
+                "group_ids": group_ids,   # ★ add groupid
             },
             batch_size=len(samples),
         )
