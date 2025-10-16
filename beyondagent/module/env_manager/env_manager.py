@@ -496,7 +496,7 @@ class ParallelEnvManager(object):
         task_ids = []
         rollout_ids = []
         extras = [] # List of dictionaries containing supplementary data for each trajectory, including "add_exp", "task_train_expmode", "experience"
-
+        k_text_list = []
         for sample in samples:
             # Validate that all fields have the same length
             assert len(sample.input_ids) == len(sample.attention_mask) == len(sample.position_ids) == len(
@@ -520,8 +520,11 @@ class ParallelEnvManager(object):
 
             # ------------- shuchang 0714: append step_ids and steps_texts ------------
             resp_ids = sample.response_ids
+            # shuchang: 0809
+            # FIXME: 解决stepid对不齐的问题，使用统一的step解析函数parse_response_ids_to_steps 
             resp_ids = sample.response_ids
-            parse_result = parse_response_ids_to_steps(resp_ids, self.tokenizer)  # ⭐ Parse the response IDs into step IDs and texts
+            parse_result = parse_response_ids_to_steps(resp_ids, self.tokenizer) # ⭐ Parse the response IDs into step IDs and texts
+
             step_ids_list.append(torch.tensor(parse_result.step_ids, dtype=torch.long))
             # generate steps_texts (for semantic evaluation)
             steps_texts_list.append([
@@ -568,6 +571,7 @@ class ParallelEnvManager(object):
         step_ids_pad = pad_sequence(
             step_ids_list, batch_first=True, padding_value=-1
         )
+
         step_ids_pad = pad_sequence_to_length(
             step_ids_pad, self.config.data.max_response_length, -1
         )  # ⭐ Pad step IDs to the maximum response length

@@ -33,7 +33,7 @@ nav:
       - Task Manager: guidelines/task_manager.md
       - Context Manager: guidelines/context_manager.md
       - Experience Manager: guidelines/exp_manager.md
-      - Credit Manager: guidelines/credit_manager.md
+      - Advantage Processor: guidelines/adv_processor.md
   - API Reference:
       - API Reference: api/api_1.md
 
