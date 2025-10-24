@@ -116,3 +116,25 @@ Using AgentEvoler launcher to start environment, log dashboard and training proc
 ```bash
 python launcher.py --conf examples/self-question-attr.yaml --with-appworld --with-logview
 ```
+
+## 🧩 Advantage Usage
+submodule doc list
+
+## 🌟 Benchmark Performance
+add some result here
+
+<!-- ## 🌟 Contact Us -->
+
+## 🙏 Acknowledgements
+This project builds upon the excellent work of several open-source projects:
+
+- ReMe
+- veRL
+- mkdocs-material
+
+## 📚 Citation
+If you find this work useful, please consider citing:
+
+```bibtex
+@misc{}
+```
