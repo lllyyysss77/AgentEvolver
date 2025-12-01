@@ -79,12 +79,13 @@ CuES is evaluated on **AppWorld**, **WebShop**, and **BFCL v3 Multi-Turn Base**,
 ```python
 # Create and activate a virtual environment
 # Install dependencies (adapt to your environment)
-bash ./env_service/environments/appworld/setup.sh
+# Refer to the agentevolver repository for environment installation.
+# bash ./env_service/environments/appworld/setup.sh
 # Export your DashScope key:
-export DASHSCOPE_API_KEY=... (or set in config.yaml)
-conda activate appworld
-bash ./env_service/launch_script/appworld.sh
-python ./env_service/test_script/test_appworld.py
+# export DASHSCOPE_API_KEY=... (or set in config.yaml)
+# conda activate appworld
+# bash ./env_service/launch_script/appworld.sh
+# python ./env_service/test_script/test_appworld.py
 ```
 
 3) Configuration
@@ -141,7 +142,6 @@ Outputs are written to `./data/`:
   - core/: API client, memory manager, pipeline
   - data/: pydantic-like models and storage helpers
   - envs/: EnvService managers (AppWorld, BFCL, WebShop)
-  - environment/: legacy base abstractions
   - prompts/: all prompt builders and parsers
   - stages/: Stage 1/2/3 implementations
   - utils/: logger and config utilities
