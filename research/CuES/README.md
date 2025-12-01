@@ -1,13 +1,7 @@
-<table>
-  <tr>
-    <td style="vertical-align: middle; padding-right: 10px;">
-      <img src="figs/mozhang3.png" alt="mozhang3" width="48">
-    </td>
-    <td>
-      <h2>CuES: A Curiosity-driven and Environment-grounded Synthesis Framework for Agentic RL</h2>
-    </td>
-  </tr>
-</table>
+<h2 align="left">
+ <img src="figs/mozhang3.png" alt="CuES Logo" width="3%"> CuES: A Curiosity-driven and Environment-grounded Synthesis Framework for Agentic RL
+</h2>
+
 
 
 <p align="center">
