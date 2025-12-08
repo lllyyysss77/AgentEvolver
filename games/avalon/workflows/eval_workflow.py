@@ -2,6 +2,7 @@
 """AvalonWorkflow class for running Avalon game workflows."""
 import asyncio
 import os
+import copy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 from collections import defaultdict
@@ -39,11 +40,10 @@ class RoleManager:
         return self.roles[index][1]
 
 
-class EvalAvalonWorkflow(BaseAgentscopeWorkflow):
+class EvalAvalonWorkflow:
     """Workflow class for Avalon game evaluation."""
     
-    def __init__(self, task: Task, llm_chat_fn: Any, model_name: str, **kwargs):
-        super().__init__(task, llm_chat_fn, model_name, **kwargs)
+    def __init__(self, task: Task):
         self.config_dict = task.metadata.get('avalon_config', task.metadata)
         self.role_manager: Optional[RoleManager] = None
     
@@ -56,7 +56,7 @@ class EvalAvalonWorkflow(BaseAgentscopeWorkflow):
         roles_config = self.config_dict.get('roles', {})
         
         # Start with default_model config
-        config = {**default_model}
+        config = copy.deepcopy({**default_model})
         
         # Find role-specific config (try indexed_role first, then base_role)
         role_config = next(
@@ -117,7 +117,7 @@ class EvalAvalonWorkflow(BaseAgentscopeWorkflow):
             toolkit=Toolkit(),
         )
     
-    async def _execute_async(self) -> Union[Trajectory, List[Trajectory]]:
+    async def _execute_async(self) -> bool:
         """Execute the game asynchronously."""
         game_config = self.config_dict.get('game', {})
         

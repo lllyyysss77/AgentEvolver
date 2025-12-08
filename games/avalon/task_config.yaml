@@ -11,21 +11,22 @@ game:
 # temperature, max_tokens, stream, trainable are optional - if not specified, use default_model configuration
 roles:
   merlin:
-    model_name: qwen2.5-14b-instruct
+    model_name: qwen2.5-32b-instruct
     # temperature: 0.7  # Optional, uses default_model configuration
     # max_tokens: 2048  # Optional
   
   servant_0:
-    model_name: qwen2.5-3b-instruct
+    model_name: qwen2.5-32b-instruct
   
   servant_1:
     url: http://localhost:8000/v1
     model_name: local_model
-    trainable: true
-    stream: true
   
   minion:
     model_name: qwen-max
+    
+  # assassin:
+  #   act_by_user: true
 
 # Default model configuration
 # Used for roles not configured in roles, or as default values for optional parameters in roles
@@ -36,4 +37,4 @@ default_model:
   max_tokens: 2048
   stream: true
   trainable: false
-
+  act_by_user: false

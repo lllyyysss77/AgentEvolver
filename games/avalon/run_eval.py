@@ -41,19 +41,14 @@ def main():
     
     # 2. 调用 workflow 运行
     task = Task(
-        task_id="eval_task",
-        env_type="avalon",
+        task_id="001",
+        env_type="",
         open_query=False,
         metadata={"avalon_config": config_dict},
     )
     
-    def llm_chat(messages, custom_sampling_params=None, request_id=None):
-        return {"role": "assistant", "value": ""}
-    
     workflow = EvalAvalonWorkflow(
         task=task,
-        llm_chat_fn=llm_chat,
-        model_name="eval-model",
     )
     
     workflow.execute()
