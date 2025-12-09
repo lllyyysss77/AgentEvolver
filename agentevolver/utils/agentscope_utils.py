@@ -180,6 +180,10 @@ class BaseAgentscopeWorkflow(ABC):
         task: Task,
         llm_chat_fn: Callable,
         model_name: str,
+        config: Any,
+        tokenizer: Any,
+        data_id: str,
+        rollout_id: str,
         **kwargs
     ):
         """
@@ -189,11 +193,19 @@ class BaseAgentscopeWorkflow(ABC):
             task (Task): The task to be executed.
             llm_chat_fn (Callable): The LLM chat function to use for agent creation.
             model_name (str): The name of the model.
+            config: Configuration object (required for CMT functionality).
+            tokenizer: Tokenizer instance (required for CMT functionality).
+            data_id (str): The ID of the data.
+            rollout_id (str): The ID of the rollout.
             **kwargs: Additional keyword arguments.
         """
         self.task = task
         self.llm_chat_fn = llm_chat_fn
         self.model_name = model_name
+        self.config = config
+        self.tokenizer = tokenizer
+        self.data_id = data_id
+        self.rollout_id = rollout_id
         
         # Create agentscope model wrapper from llm_chat_fn
         self.model = AgentscopeModelWrapper(

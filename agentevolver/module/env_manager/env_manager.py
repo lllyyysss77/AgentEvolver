@@ -344,11 +344,15 @@ class ParallelEnvManager(object):
                 
                 workflow_cls = dynamic_import(workflow_import)
                 
-                # Instantiate workflow with llm_chat_fn
+                # Instantiate workflow with llm_chat_fn, config, tokenizer, data_id, and rollout_id
                 workflow = workflow_cls(
                     task=task,
                     llm_chat_fn=llm_chat_fn,
                     model_name=self.model_name,
+                    config=self.config,
+                    tokenizer=self.tokenizer,
+                    data_id=data_id,
+                    rollout_id=rollout_id,
                     **kwargs
                 )
                 
