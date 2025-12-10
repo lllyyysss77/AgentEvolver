@@ -563,7 +563,7 @@ async def diplomacy_game(
         config=config,
         log_dir=log_dir,
         state_manager=state_manager,
-        language="zn" if os.getenv('LANGRANGE') == 'zn' else "en",
+        language="zn" if os.getenv('LANGUAGE') == 'zn' else "en",
         observe_agent=observe_agent
     )
     
