@@ -217,7 +217,6 @@ class AvalonGameEnvironment():
     def from_presets(cls, presets: Dict) -> 'AvalonGameEnvironment':
         r"""Instantiate the environment with game presets"""
         config = AvalonBasicConfig.from_presets(presets)
-        cls.config = config
 
         print(presets)
 
@@ -231,25 +230,28 @@ class AvalonGameEnvironment():
             if role in ["Morgana", "Mordred", "Oberon", "Minion", "Assassin"]:
                 is_good[idx] = False
 
-        cls.roles = np.array(role_ids)
-        cls.role_names = role_names
-        cls.is_good = np.array(is_good)
-        cls.quest_leader = quest_leader
-
-        cls.round = 0
-        cls.quest = 0
-        cls.phase = 0
-        cls.turn = 0
-        cls.done = False
-        cls.good_victory = False
-
-        cls.quest_results = []
-        cls.quest_team = []
-        cls.team_votes = []
-        cls.quest_votes = []
+        # Create instance first
+        instance = cls(config)
         
+        # Set instance variables (not class variables) to ensure each instance has its own state
+        instance.roles = np.array(role_ids)
+        instance.role_names = role_names
+        instance.is_good = np.array(is_good)
+        instance.quest_leader = quest_leader
 
-        return cls(config)
+        instance.round = 0
+        instance.quest = 0
+        instance.phase = 0
+        instance.turn = 0
+        instance.done = False
+        instance.good_victory = False
+
+        instance.quest_results = []
+        instance.quest_team = []
+        instance.team_votes = []
+        instance.quest_votes = []
+        
+        return instance
 
     def reset(self):
         '''

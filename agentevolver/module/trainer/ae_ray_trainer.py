@@ -880,6 +880,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                 tasks = [Task(
                             task_id=test_gen_batch.non_tensor_batch["extras"][i]["task_id"],
                             query=test_gen_batch.non_tensor_batch["extras"][i]['new_query'],
+                            metadata=test_gen_batch.non_tensor_batch["extras"][i]['metadata'],
                             env_type=self.config.env_service.env_type,
                             open_query=test_gen_batch.non_tensor_batch["extras"][i]['open_query'],
                             # evaluator=gen_batch.non_tensor_batch['extras'][i]['evaluator'], # avoid potential bugs
@@ -1008,6 +1009,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                 tasks = [Task(
                             task_id=test_gen_batch.non_tensor_batch["extras"][i]["task_id"],
                             query=test_gen_batch.non_tensor_batch["extras"][i]['new_query'],
+                            metadata=test_gen_batch.non_tensor_batch["extras"][i]['metadata'],
                             env_type=self.config.env_service.env_type,
                             open_query=test_gen_batch.non_tensor_batch["extras"][i]['open_query'],
                             # evaluator=gen_batch.non_tensor_batch['extras'][i]['evaluator'], # avoid potential bugs
@@ -1119,6 +1121,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                                         query=gen_batch.non_tensor_batch["extras"][i]['new_query'],
                                         env_type=self.config.env_service.env_type,
                                         open_query=gen_batch.non_tensor_batch["extras"][i]['open_query'],
+                                        metadata=gen_batch.non_tensor_batch["extras"][i]['metadata'],
                                         evaluator=gen_batch.non_tensor_batch['extras'][i]['evaluator'],
                                         ground_truth=gen_batch.non_tensor_batch['extras'][i]['ground_truth']
                                     ) for i in range(len(gen_batch))

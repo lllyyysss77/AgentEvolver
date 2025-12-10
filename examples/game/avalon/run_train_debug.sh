@@ -3,6 +3,7 @@
 # This script trains the Avalon game using AvalonRolloutWorkflow
 # Training tasks are loaded from games/avalon/train_tasks.jsonl
 # export RAY_DEBUG_POST_MORTEM=1
+
 # source /mnt/data/yunpeng.zyp/miniconda3/etc/profile.d/conda.sh
 # conda activate verl
 
@@ -21,23 +22,23 @@ echo ""
 python3 -m agentevolver.main_ppo \
     --config-path="$PROJECT_DIR/examples/game/avalon" \
     --config-name='config' \
-    trainer.experiment_name="avalon_qwen3-14b_train" \
+    trainer.experiment_name="avalon_qwen3-4b_train" \
     trainer.project_name="avalon_game" \
     trainer.nnodes=1 \
     trainer.n_gpus_per_node=8 \
     trainer.critic_warmup=0 \
-    trainer.logger="['console','swanlab']" \
+    trainer.logger="['console']" \
     trainer.save_freq=10 \
     trainer.test_freq=10 \
     trainer.total_epochs=100 \
     trainer.val_before_train=False \
-    trainer.validation_data_dir="experiments/avalon/avalon_qwen3-14b_train/validation_log" \
-    trainer.rollout_data_dir="experiments/avalon/avalon_qwen3-14b_train/rollout_log" \
+    trainer.validation_data_dir="experiments/avalon/avalon_qwen3-4b_train/validation_log" \
+    trainer.rollout_data_dir="experiments/avalon/avalon_qwen3-4b_train/rollout_log" \
     data.train_files="$TRAIN_TASKS_FILE" \
     data.val_files="$VAL_TASKS_FILE" \
     data.train_batch_size=1 \
     data.max_prompt_length=20480 \
-    data.max_response_length=4096 \
+    data.max_response_length=2048 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.return_raw_chat=True \
@@ -45,13 +46,13 @@ python3 -m agentevolver.main_ppo \
     data.val_type="val" \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
-    actor_rollout_ref.model.path=/mnt/data/yunpeng.zyp/models/Qwen3-14B \
+    actor_rollout_ref.model.path=/mnt/data/yunpeng.zyp/models/Qwen3-4B \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.rollout.use_qwen3=False \
     actor_rollout_ref.rollout.enable_request_id=False \
     actor_rollout_ref.rollout.prompt_length=20480 \
-    actor_rollout_ref.rollout.response_length=4096 \
+    actor_rollout_ref.rollout.response_length=2048 \
     actor_rollout_ref.rollout.max_model_len=25580 \
     actor_rollout_ref.rollout.temperature=0.9 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
@@ -59,7 +60,7 @@ python3 -m agentevolver.main_ppo \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.mode=async \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
-    actor_rollout_ref.rollout.n=32 \
+    actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=25580 \
     actor_rollout_ref.rollout.max_env_worker=32 \
     actor_rollout_ref.rollout.context_template="linear" \

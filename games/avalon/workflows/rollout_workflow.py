@@ -158,6 +158,10 @@ class AvalonRolloutWorkflow(BaseAgentscopeWorkflow):
                 k: model_config[k] for k in ['temperature', 'max_tokens']
                 if k in model_config
             }
+            # turn off auto-thinking for qwen3
+            generate_kwargs['extra_body'] = {
+                    'enable_thinking': False,  # Required for non-streaming calls with DashScope
+                }
             if generate_kwargs:
                 model_kwargs['generate_kwargs'] = generate_kwargs
             
@@ -221,15 +225,39 @@ class AvalonRolloutWorkflow(BaseAgentscopeWorkflow):
         
         # Identify training agents
         self.training_indices = self._identify_training_agents()
+        
+        # Only enable console output for the first task (data_id="0" and rollout_id="0")
+        # Disable console output for all other tasks to reduce log noise
+        is_first_task = (self.data_id == "0" and self.rollout_id == "0")
+        for i in range(len(self.agents)):
+            if i in self.training_indices:
+                self.agents[i].set_console_output_enabled(is_first_task)
+            else:    
+                self.agents[i].set_console_output_enabled(False)
 
         # Run game
+        # Generate unique timestamp for parallel rollouts by including data_id and rollout_id
+        # This prevents multiple parallel rollouts from overwriting each other's logs
+        base_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_timestamp = f"{base_timestamp}_d{self.data_id}_r{self.rollout_id}"
+        
+        # Get log_dir from game config and experiment_name from self.config
+        log_dir = game_config.get('log_dir', 'logs')
+        experiment_name = getattr(self.config.trainer, 'experiment_name', None) if hasattr(self.config, 'trainer') else None
+        
+        # If experiment_name is provided, append it to log_dir
+        if experiment_name:
+            # Sanitize experiment_name to avoid filesystem issues
+            experiment_name = str(experiment_name).replace('/', '_').replace('\\', '_')
+            log_dir = os.path.join(log_dir, experiment_name)
+        
         game = AvalonGame(
             agents=self.agents,
             config=config,
-            log_dir=game_config.get('log_dir', 'logs'),
+            log_dir=log_dir,
             language=game_config.get('language', 'en'),
             preset_roles=assigned_roles,
-            timestamp=datetime.now().strftime('%Y%m%d_%H%M%S'),
+            timestamp=unique_timestamp,
         )
         
         good_victory = await game.run() or False

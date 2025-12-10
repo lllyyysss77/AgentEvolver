@@ -113,19 +113,13 @@ class ThinkingReActAgent(ReActAgent):
         # Record model call history (prompt and response)
         if msg is not None:
             # Extract text content from response
-            from games.avalon.utils import Parser
-            response_content = Parser.extract_text_from_content(msg.content)
-            
+            response_content = msg.get_text_content()
+
             # Store in history with prompt as messages list (prompt is already in messages format)
             call_record = {
                 "prompt": prompt,  # prompt is already list[dict[str, Any]]
                 "response": response_content,
-                "response_msg": msg.to_dict() if hasattr(msg, 'to_dict') else {
-                    "name": msg.name,
-                    "content": response_content,
-                    "role": msg.role,
-                    "timestamp": str(msg.timestamp) if hasattr(msg, 'timestamp') else None,
-                },
+                "response_msg": msg.to_dict() if hasattr(msg, 'to_dict') else {}
             }
             self.model_call_history.append(call_record)
         
@@ -137,112 +131,63 @@ class ThinkingReActAgent(ReActAgent):
         
         # But we need to return a message without thinking for broadcast
         # Parse to get public message (for return, but memory keeps the full one)
-        _, public_msg = self._separate_thinking_and_response(msg)
-        
-        # Create a new message object for return (without thinking, but same ID)
-        # This doesn't affect memory, which still has the full message
-        return_msg = Msg(
-            name=msg.name,
-            content=public_msg.content,
-            role=msg.role,
-            metadata=msg.metadata,
-        )
-        return_msg.id = msg.id
-        return_msg.timestamp = msg.timestamp
-        
-        return return_msg
+        return self._separate_thinking_and_response(msg)
     
     def _separate_thinking_and_response(
         self,
         msg: Msg,
-    ) -> tuple[Msg | None, Msg]:
-        """Separate thinking content from public response.
+    ) -> Msg:
+        """Remove thinking content from message and return public message only.
         
         Args:
             msg: The original message that may contain thinking section.
             
         Returns:
-            A tuple of (thinking_msg, public_msg):
-            - thinking_msg: Message containing only thinking content (or None)
-            - public_msg: Message containing only public response content
+            Message containing only public response content (without thinking).
         """
-        # Get text content
-        text_content = msg.get_text_content()
-        
-        # Pattern to match <think>...</think>
+        # Pattern to match <think>...</think> in text
         pattern = r'<think>(.*?)</think>'
-        matches = re.findall(pattern, text_content, re.DOTALL)
+        public_blocks = []
         
-        thinking_content = None
-        if matches:
-            # Extract thinking content
-            thinking_content = matches[0].strip()
-            
-            # Remove thinking section from public content
+        # Handle content as list of blocks (typical case for OpenAIChatModel)
+        if isinstance(msg.content, list):
+            for block in msg.content:
+                block_type = block.get("type")
+                
+                if block_type == "thinking":
+                    # Skip thinking blocks
+                    continue
+                    
+                elif block_type == "text":
+                    # TextBlock - check if it contains <think> tags
+                    text_content = block.get("text", "")
+                    # Remove thinking section from text
+                    cleaned_text = re.sub(pattern, '', text_content, flags=re.DOTALL).strip()
+                    if cleaned_text:
+                        public_blocks.append(
+                            TextBlock(type="text", text=cleaned_text),
+                        )
+                else:
+                    # Other block types (tool_use, image, audio, etc.) - keep as public
+                    public_blocks.append(block)
+                    
+        elif isinstance(msg.content, str):
+            # Handle content as string (fallback case)
+            text_content = msg.content
+            # Remove thinking section from text
             public_content = re.sub(pattern, '', text_content, flags=re.DOTALL).strip()
-        else:
-            # No thinking section found, all content is public
-            public_content = text_content
-        
-        # Create thinking message if thinking content exists
-        thinking_msg = None
-        if thinking_content:
-            thinking_msg = Msg(
-                name=self.name,
-                content=[
-                    TextBlock(
-                        type="text",
-                        text=f"<think>\n{thinking_content}\n</think>",
-                    ),
-                ],
-                role="assistant",
-            )
+            if public_content:
+                public_blocks.append(
+                    TextBlock(type="text", text=public_content),
+                )
         
         # Create public message (without thinking)
-        # Reconstruct content blocks
-        public_blocks = []
-        if isinstance(msg.content, str):
-            public_blocks = [
-                TextBlock(type="text", text=public_content),
-            ]
-        elif isinstance(msg.content, list):
-            # Check if there are non-text blocks (like tool_use)
-            has_non_text = any(
-                block.get("type") != "text"
-                for block in msg.content
-            )
-            
-            if has_non_text:
-                # Keep non-text blocks, update text blocks
-                for block in msg.content:
-                    if block.get("type") == "text":
-                        # Remove thinking from text blocks
-                        block_text = block.get("text", "")
-                        if "<think>" in block_text:
-                            cleaned_text = re.sub(
-                                pattern,
-                                '',
-                                block_text,
-                                flags=re.DOTALL,
-                            ).strip()
-                            if cleaned_text:
-                                public_blocks.append(
-                                    TextBlock(type="text", text=cleaned_text),
-                                )
-                        else:
-                            public_blocks.append(block)
-                    else:
-                        public_blocks.append(block)
-            else:
-                # All text blocks, use cleaned content
-                if public_content:
-                    public_blocks = [
-                        TextBlock(type="text", text=public_content),
-                    ]
+        # Use empty list/string if no public content remains
+        final_content = public_blocks if public_blocks else ([] if isinstance(msg.content, list) else "")
         
         public_msg = Msg(
             name=msg.name,
-            content=public_blocks or msg.content,
+            content=final_content,
             role=msg.role,
             metadata=msg.metadata,
         )
@@ -250,7 +195,7 @@ class ThinkingReActAgent(ReActAgent):
         public_msg.id = msg.id
         public_msg.timestamp = msg.timestamp
         
-        return thinking_msg, public_msg
+        return public_msg
     
     # Note: We don't need to override _broadcast_to_subscribers
     # because reply() already returns a message without thinking content.

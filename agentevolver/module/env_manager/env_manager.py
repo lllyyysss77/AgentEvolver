@@ -226,6 +226,10 @@ class ParallelEnvManager(object):
                            thread_index: int, tmux: dict, stop:list, **kwargs) -> Trajectory:
         """
         Processes a single task in a thread-safe way, handling retries and exceptions.
+        
+        This method supports two modes:
+        1. Agentscope workflow mode: If agentscope_workflow is configured, uses agentscope workflow
+        2. Standard env worker mode: Otherwise, uses the standard EnvWorker with AgentFlow
 
         Args:
             task (Task): The task to be processed.
@@ -244,8 +248,7 @@ class ParallelEnvManager(object):
         max_retry = 4
         for retry in range(max_retry):
             try:
-
-                # TODO add try exception
+                # Prepare sampling parameters
                 sampling_params = dict(
                     n=1,
                     max_completion_tokens=self.rollout_config.response_length,
@@ -258,18 +261,43 @@ class ParallelEnvManager(object):
                     sampling_params["top_p"] = self.rollout_config.val_kwargs.top_p
 
                 llm_chat_fn = self.get_llm_chat_fn(sampling_params)
-                reward_caculator=grader_manager.get_calculator(task.evaluator, task=task)
-                agent_flow: BaseAgentFlow = AgentFlow(
-                    reward_calculator=reward_caculator,
-                    llm_chat_fn=llm_chat_fn,
-                    tokenizer=self.tokenizer,
-                    config=self.config,
-                    **kwargs
-                )
+                
+                # Check if agentscope_workflow is configured
+                workflow_import = self.config.actor_rollout_ref.rollout.get("agentscope_workflow", None)
+                
+                if workflow_import is not None:
+                    # Use agentscope workflow mode
+                    workflow_cls = dynamic_import(workflow_import)
+                    
+                    # Instantiate workflow with llm_chat_fn, config, tokenizer, data_id, and rollout_id
+                    workflow = workflow_cls(
+                        task=task,
+                        llm_chat_fn=llm_chat_fn,
+                        model_name=self.model_name,
+                        config=self.config,
+                        tokenizer=self.tokenizer,
+                        data_id=data_id,
+                        rollout_id=rollout_id,
+                        **kwargs
+                    )
+                    
+                    # Execute the workflow
+                    trajectory: Trajectory = workflow.execute()
+                    return trajectory
+                else:
+                    # Use standard env worker mode
+                    reward_caculator = grader_manager.get_calculator(task.evaluator, task=task)
+                    agent_flow: BaseAgentFlow = AgentFlow(
+                        reward_calculator=reward_caculator,
+                        llm_chat_fn=llm_chat_fn,
+                        tokenizer=self.tokenizer,
+                        config=self.config,
+                        **kwargs
+                    )
 
-                env_worker = EnvWorker(task=task, thread_index=thread_index, config=self.config, tokenizer=self.tokenizer)
-                trajectory: Trajectory = env_worker.execute(data_id=data_id, rollout_id=rollout_id, traj_exp_config=traj_exp_config, agent_flow=agent_flow, tmux=tmux, stop=stop) # ⭐ Execute the task and generate the trajectory
-                return trajectory
+                    env_worker = EnvWorker(task=task, thread_index=thread_index, config=self.config, tokenizer=self.tokenizer)
+                    trajectory: Trajectory = env_worker.execute(data_id=data_id, rollout_id=rollout_id, traj_exp_config=traj_exp_config, agent_flow=agent_flow, tmux=tmux, stop=stop) # ⭐ Execute the task and generate the trajectory
+                    return trajectory
 
             except Exception as e:
                 if retry < max_retry - 1:
@@ -279,98 +307,6 @@ class ParallelEnvManager(object):
                     logger.bind(exception=True).exception(f"rollout_env_worker failed after {max_retry} retries: {e.args}")
                     raise e
 
-    def rollout_agentscope_worker(
-        self,
-        task: Task,
-        traj_exp_config: TrajExpConfig,
-        data_id: str,
-        rollout_id: str,
-        mode: Literal["sample", "validate"],
-        thread_index: int,
-        tmux: dict,
-        stop: list,
-        **kwargs
-    ) -> Trajectory:
-        """
-        Processes a single agentscope workflow task, collects model call data from agents,
-        and returns a Trajectory.
-        
-        This method dynamically imports and runs an agentscope workflow class from config,
-        collects model call history from agents created by the workflow, and converts it
-        into a Trajectory format for training.
-
-        Args:
-            task (Task): The task to be processed.
-            traj_exp_config (TrajExpConfig): Experience Configuration for the trajectory.
-            data_id (str): The ID of the data.
-            rollout_id (str): The ID of the rollout.
-            mode (Literal["sample", "validate"]): The mode of operation, either 'sample' or 'validate'.
-            thread_index (int): The index of the thread.
-            tmux (dict): TMUX configuration for tracking steps and tokens.
-            stop (list): List of stop conditions.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            Trajectory: The trajectory generated from the agentscope workflow execution.
-        """
-        max_retry = 4
-        for retry in range(max_retry):
-            try:
-                # Prepare sampling parameters
-                sampling_params = dict(
-                    n=1,
-                    max_completion_tokens=self.rollout_config.response_length,
-                    temperature=self.rollout_config.temperature,
-                    top_p=self.rollout_config.top_p
-                )
-
-                if mode == "validate":
-                    sampling_params["temperature"] = self.rollout_config.val_kwargs.temperature
-                    sampling_params["top_k"] = self.rollout_config.val_kwargs.top_k
-                    sampling_params["top_p"] = self.rollout_config.val_kwargs.top_p
-
-                # Get llm_chat function
-                llm_chat_fn = self.get_llm_chat_fn(sampling_params)
-                
-                # Dynamically import workflow class from config
-                # Expected config path: config.actor_rollout_ref.rollout.agentscope_workflow
-                workflow_import = self.config.actor_rollout_ref.rollout.get("agentscope_workflow", None)
-                if workflow_import is None:
-                    raise ValueError(
-                        "agentscope_workflow not found in config. "
-                        "Please set config.actor_rollout_ref.rollout.agentscope_workflow "
-                        "to a string like 'module.path->WorkflowClass'"
-                    )
-                
-                workflow_cls = dynamic_import(workflow_import)
-                
-                # Instantiate workflow with llm_chat_fn, config, tokenizer, data_id, and rollout_id
-                workflow = workflow_cls(
-                    task=task,
-                    llm_chat_fn=llm_chat_fn,
-                    model_name=self.model_name,
-                    config=self.config,
-                    tokenizer=self.tokenizer,
-                    data_id=data_id,
-                    rollout_id=rollout_id,
-                    **kwargs
-                )
-                
-                # Execute the workflow
-                trajectory: Trajectory = workflow.execute()
-                return trajectory
-
-            except Exception as e:
-                if retry < max_retry - 1:
-                    logger.bind(exception=True).exception(
-                        f"rollout_agentscope_worker error: {e.args}, retrying {retry + 1}/{max_retry}"
-                    )
-                    time.sleep(2 ** retry)
-                else:
-                    logger.bind(exception=True).exception(
-                        f"rollout_agentscope_worker failed after {max_retry} retries: {e.args}"
-                    )
-                    raise e
 
     def rollout(self, tasks: List[Task], task_exp_configs: List[TaskExpConfig], mode: Literal["sample", "validate"], epoch: str) -> List[Trajectory]:
         """

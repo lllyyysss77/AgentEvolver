@@ -89,7 +89,7 @@ class AgentscopeCMT(Linear_CMT):
                 ext_msg = ExtendedMessage(
                     author="initialization",  # Non-trainable: need_training=False
                     role=msg.get("role", "user"),
-                    content=str(msg.get("content", "")),
+                    content=str(msg.get_text_content()), # get text content in the text block
                     token_generator="manual",  # Use manual to compute context-based incremental tokens
                     tokenizer=self.tokenizer,
                 )

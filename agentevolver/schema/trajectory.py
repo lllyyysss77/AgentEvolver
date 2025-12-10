@@ -92,7 +92,7 @@ class Sample(BaseModel):
             print(f"-------------------------------------------------------------------------------------------------------")
             print(f"Warning: prompt_ids length {len(self.prompt_ids)} exceeds max_prompt_len {self.max_prompt_len}, truncating.")
             print(f"-------------------------------------------------------------------------------------------------------")
-            raise RuntimeError("Prompt length exceeds maximum allowed length. Please adjust the input data.")
+            # raise RuntimeError("Prompt length exceeds maximum allowed length. Please adjust the input data.")
             self.prompt_ids = self.prompt_ids[-self.max_prompt_len:]
             self.prompt_attention_mask = self.prompt_attention_mask[-self.max_prompt_len:]
             self.prompt_position_ids = self.prompt_position_ids[-self.max_prompt_len:]

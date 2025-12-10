@@ -18,15 +18,18 @@ def convert_to_tasks(dataset:RLHFDataset,env_type:str, grader:str)->list[Task]:
     """
     res=[]
     for record in dataset:
-        # set query to None to disable query replacement
+        extras = record.get("extras", {})
+        # Read all fields from extras, with fallback defaults
         task = Task(
-            task_id=record["extras"]["task_id"],
+            task_id=extras.get("task_id", ""),
             env_type=env_type,
-            open_query=False,
-            evaluator=grader,
+            open_query=extras.get("open_query", False),
+            metadata=extras.get("metadata", {}),
+            query=extras.get("new_query"),  # Note: stored as "new_query" in extras
+            ground_truth=extras.get("ground_truth"),
+            evaluator=extras.get("evaluator", grader),
         )
         res.append(task)
-    
     return res
 
 def to_rl_dataset(
@@ -56,6 +59,7 @@ def to_rl_dataset(
                 "new_query": task.query,
                 "evaluator": task.evaluator,
                 "ground_truth": task_obj.ground_truth, # for some graders, such as LLM Judge w/ GT
+                "metadata": task.metadata,  # Preserve metadata for avalon config and other use cases
             },
         }
 

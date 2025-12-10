@@ -9,6 +9,11 @@ from loguru import logger
 
 from agentevolver.schema.task import Task
 from agentevolver.schema.trajectory import Trajectory
+# Try to import agentscope model classes
+
+from agentscope.model import ChatModelBase
+from agentscope.model import ChatResponse
+from agentscope.message import TextBlock, Msg
 
 
 def dynamic_import(module_class_str: str):
@@ -30,8 +35,9 @@ class AgentscopeModelWrapper:
     """
     A wrapper class that adapts llm_chat function to agentscope's ChatModelBase interface.
     
-    This wrapper converts between agentscope's message format (role/content) and
-    the internal message format (role/value), and handles async/sync conversion.
+    This wrapper converts between agentscope's message format (role/content with blocks) and
+    the internal message format (role/content), and handles async/sync conversion.
+    All input and output are based on block-based as message format.
     """
     
     def __init__(
@@ -48,16 +54,7 @@ class AgentscopeModelWrapper:
             model_name (str): The name of the model.
             stream (bool): Whether to use streaming (currently not supported, defaults to False).
         """
-        # Try to import agentscope model classes
-        try:
-            from agentscope.model import ChatModelBase
-            from agentscope.model import ChatResponse
-            from agentscope.message import TextBlock
-        except ImportError as e:
-            logger.error(f"Failed to import agentscope model classes: {e}. "
-                        "Please ensure agentscope is installed.")
-            raise
-        
+   
         self.model_name = model_name
         self.stream = stream
         self.llm_chat_fn = llm_chat_fn
@@ -65,62 +62,113 @@ class AgentscopeModelWrapper:
         # Store imported classes for use in methods
         self.ChatResponse = ChatResponse
         self.TextBlock = TextBlock
+        self.Msg = Msg
+    
+    def _extract_text_from_content(self, content: Any) -> str:
+        """
+        Extract text content from agentscope message content (string or block list).
+        
+        This method handles block-based content format by extracting text from all text blocks.
+        
+        Args:
+            content: Content can be:
+                - str: Direct text content
+                - list: List of content blocks (TextBlock, ImageBlock, etc.)
+                    Each block can be:
+                    - dict with "type" and "text" keys
+                    - Object with "type" and "text" attributes (TextBlock)
+                    - str (direct string in list)
+        
+        Returns:
+            str: Extracted text content from all text blocks.
+        """
+        # Handle string content
+        if isinstance(content, str):
+            return content
+        
+        # Handle list of blocks
+        if isinstance(content, list):
+            text_parts = []
+            for block in content:
+                # Handle dict-based blocks
+                if isinstance(block, dict):
+                    block_type = block.get("type")
+                    if block_type == "text":
+                        text_parts.append(block.get("text", ""))
+                    # For other block types (image, audio, video, etc.), 
+                    # we skip them as they don't have text content
+                # Handle object-based blocks (TextBlock, etc.)
+                elif hasattr(block, "get"):
+                    # Dict-like object
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                elif hasattr(block, "text"):
+                    # Object with text attribute (TextBlock)
+                    text_parts.append(block.text)
+                elif isinstance(block, str):
+                    # Direct string in list
+                    text_parts.append(block)
+            
+            return "".join(text_parts)
+        
+        # Fallback: convert to string
+        return str(content) if content else ""
     
     def _convert_messages_to_internal_format(self, messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         """
-        Convert agentscope message format (role/content) to internal format (role/value).
+        Convert agentscope message format (role/content with blocks) to internal format (role/content).
+        
+        This method properly handles block-based message format by extracting text from blocks.
         
         Args:
             messages (List[Dict[str, Any]]): Messages in agentscope format.
+                Each message can be:
+                - Dict with "role" and "content" keys, where content can be str or list of blocks
+                - Msg object (has get_text_content method)
             
         Returns:
-            List[Dict[str, str]]: Messages in internal format.
+            List[Dict[str, str]]: Messages in internal format with "role" and "content" keys.
         """
         converted = []
         for msg in messages:
-            # Extract content from various formats
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                # Handle content blocks
-                text_content = ""
-                for block in content:
-                    if isinstance(block, dict):
-                        if block.get("type") == "text":
-                            text_content += block.get("text", "")
-                        elif "text" in block:
-                            text_content += block.get("text", "")
-                    elif hasattr(block, "text"):
-                        text_content += block.text
-                content = text_content
-            elif not isinstance(content, str):
-                content = str(content) if content else ""
+            # Handle Msg object (has get_text_content method)
+            if hasattr(msg, "get_text_content"):
+                # It's a Msg object, use its methods to extract role and content
+                role = getattr(msg, "role", "user")
+                content = msg.get_text_content() or ""
+            else:
+                # Handle dict format
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                # Extract text from content (handles both string and block formats)
+                content = self._extract_text_from_content(content)
             
             converted.append({
-                "role": msg.get("role", "user"),
-                "value": content,
+                "role": role,
+                "content": content,
             })
         return converted
     
     def _convert_response_to_agentscope_format(self, response: Dict[str, str]) -> Any:
         """
-        Convert internal response format to agentscope ChatResponse.
+        Convert internal response format to agentscope ChatResponse with block-based format.
         
         Args:
-            response (Dict[str, str]): Response in internal format (role/value).
+            response (Dict[str, str]): Response in internal format (role/content).
             
         Returns:
-            ChatResponse: Response in agentscope format.
+            ChatResponse: Response in agentscope format with TextBlock content.
         """
-        content = response.get("value", "")
+        content = response.get("content", "")
         if not isinstance(content, str):
             content = str(content) if content else ""
         
-        # Create TextBlock from content
+        # Create TextBlock from content (block-based format)
         text_block = self.TextBlock(type="text", text=content)
         
-        # Create ChatResponse
+        # Create ChatResponse with block-based content
         chat_response = self.ChatResponse(
-            content=[text_block],
+            content=[text_block],  # Block-based format
             usage=None,  # Usage information not available from llm_chat
             metadata=None,
         )
@@ -132,7 +180,7 @@ class AgentscopeModelWrapper:
         tools: List[Dict] | None = None,
         tool_choice: str | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> ChatResponse:
         """
         Call the wrapped llm_chat function asynchronously.
         

@@ -2,6 +2,12 @@
 """Example of using ThinkingReActAgent."""
 import asyncio
 import os
+import sys
+from pathlib import Path
+
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 from agentscope.formatter import DashScopeChatFormatter
 from agentscope.model import DashScopeChatModel
@@ -10,7 +16,7 @@ from agentscope.message import Msg
 from agentscope.pipeline import MsgHub, sequential_pipeline
 from agentscope.tool import Toolkit
 
-from thinking_react_agent import ThinkingReActAgent
+from games.avalon.agents.thinking_react_agent import ThinkingReActAgent
 
 
 async def main() -> None:
