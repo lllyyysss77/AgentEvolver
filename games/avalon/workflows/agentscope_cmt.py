@@ -137,6 +137,17 @@ class AgentscopeCMT(Linear_CMT):
         # Tokenize the steps
         cmt_tokenized = self.tokenize_steps(ext_steps=full_context)
         
+        # Check if prompt is too long - if so, skip this sample
+        prompt_len = len(cmt_tokenized["prompt_ids"])
+        max_prompt_len = self.config.data.max_prompt_length
+        if prompt_len > max_prompt_len:
+            from loguru import logger
+            logger.warning(
+                f"Skipping sample (data_id={self.data_id}, minor_index_id={minor_index_id}): "
+                f"prompt_ids length {prompt_len} exceeds max_prompt_len {max_prompt_len}"
+            )
+            return None
+        
         # Create Sample
         sample = Sample(
             data_id=self.data_id,
@@ -168,6 +179,7 @@ class AgentscopeCMT(Linear_CMT):
     def group_tokenize(self):
         """
         Tokenize each prompt-response pair in model_call_history into a Sample.
+        Samples with prompt length exceeding max_prompt_length will be skipped.
         
         Returns:
             List[Sample]: A list of Sample objects, one for each prompt-response pair.
@@ -176,7 +188,8 @@ class AgentscopeCMT(Linear_CMT):
         
         for minor_index_id, call_record in enumerate(self.model_call_history):
             sample = self._build_sample_from_call_record(call_record, minor_index_id)
-            sample_arr.append(sample)
+            if sample is not None:  # Skip None samples (prompt too long)
+                sample_arr.append(sample)
         
         return sample_arr
     
