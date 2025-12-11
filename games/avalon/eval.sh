@@ -1,77 +1,79 @@
 #!/bin/bash
 # Start vllm server and run evaluation
 
-set -e  # Exit on error
+set -e
 
-# Configuration
-MODEL_PATH="/mnt/data_aisys_cpfs/xielipeng.xlp/models/Qwen2.5-7B-Instruct"
-HOST="localhost"
-PORT=8000
 
-# Get the directory where this script is located
+# ===== Parameters =====
+START_VLLM="${START_VLLM:-false}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-avalon_allplayers_qwen3-a3b-instruct-2507_nothink_wthinkprompt_eval}"
+NUM_GAMES="${NUM_GAMES:-1}"
+
+# ===== Configuration =====
+MODEL_PATH="${VLLM_MODEL_PATH:-/mnt/data/zouanni.zan/models/Qwen3-32B}"
+HOST="${VLLM_HOST:-localhost}"
+PORT="${VLLM_PORT:-8000}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="$SCRIPT_DIR/task_config.yaml"
+CONFIG_FILE="${CONFIG_FILE:-$SCRIPT_DIR/task_config.yaml}"
+
+# Ensure CONFIG_FILE is an absolute path
+if [[ "$CONFIG_FILE" != /* ]]; then
+    CONFIG_FILE="$(cd "$(dirname "$CONFIG_FILE")" && pwd)/$(basename "$CONFIG_FILE")"
+fi
+
+# Verify config file exists
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Error: Config file not found: $CONFIG_FILE" >&2
+    exit 1
+fi
+
+MAX_WORKERS="${MAX_WORKERS:-}"
 
 MODEL_NAME="local_model"
 
-# Function to check if server is already running
+# ===== Helper Functions =====
 check_server() {
-    if curl -s "http://${HOST}:${PORT}/v1/models" > /dev/null 2>&1; then
-        return 0  # Server is running
-    else
-        return 1  # Server is not running
-    fi
+    curl -s "http://${HOST}:${PORT}/v1/models" > /dev/null 2>&1
 }
 
-# Function to cleanup on exit
-cleanup() {
-    if [ -n "$VLLM_PID" ] && [ "$SERVER_STARTED" = "true" ]; then
-        echo "Stopping vllm server (PID: $VLLM_PID)..."
-        kill $VLLM_PID 2>/dev/null || true
-        wait $VLLM_PID 2>/dev/null || true
-    fi
-}
-
-# Register cleanup function
-trap cleanup EXIT INT TERM
-
-# 1. 检查 vllm server 是否已经运行
-echo "Checking if vllm server is already running on ${HOST}:${PORT}..."
-if check_server; then
-    echo "✓ vllm server is already running on ${HOST}:${PORT}"
-    SERVER_STARTED="false"
-    VLLM_PID=""
-else
-    echo "vllm server is not running. Starting vllm server..."
-    SERVER_STARTED="true"
+start_vllm_server() {
+    echo "Starting vllm server..."
     vllm serve "$MODEL_PATH" \
         --served-model-name "$MODEL_NAME" \
         --host "$HOST" \
-        --port "$PORT" &
+        --port "$PORT" > /dev/null 2>&1 &
     
     VLLM_PID=$!
     
     # Wait for server to be ready
-    echo "Waiting for vllm server to be ready..."
-    MAX_ATTEMPTS=10
-    WAIT_INTERVAL=30
-    
-    for i in $(seq 1 $MAX_ATTEMPTS); do
+    for i in {1..10}; do
         if check_server; then
-            echo "✓ vllm server is ready"
-            break
+            echo "Server started successfully"
+            return 0
         fi
-        if [ $i -eq $MAX_ATTEMPTS ]; then
-            echo "Error: vllm server failed to start within 5 minutes"
-            exit 1
-        fi
-        echo "Waiting... (attempt $i/$MAX_ATTEMPTS, will wait ${WAIT_INTERVAL}s)"
-        sleep $WAIT_INTERVAL
+        [ $i -eq 10 ] && { echo "Error: Server failed to start" >&2; exit 1; }
+        sleep 30
     done
+}
+
+cleanup() {
+    [ -n "$VLLM_PID" ] && kill $VLLM_PID 2>/dev/null && wait $VLLM_PID 2>/dev/null
+}
+
+# ===== Main =====
+trap cleanup EXIT INT TERM
+
+# Start server if needed
+if [ "$START_VLLM" = "true" ] && ! check_server; then
+    start_vllm_server
 fi
 
-# 2. 运行 run_eval.py，传递 task_config.yaml 路径
-echo "Running evaluation..."
+# Run evaluation
 cd "$SCRIPT_DIR"
-python run_eval.py --config "$CONFIG_FILE"
-
+python run_eval.py \
+    --config "$CONFIG_FILE" \
+    --num-games "$NUM_GAMES" \
+    ${MAX_WORKERS:+--max-workers "$MAX_WORKERS"} \
+    ${EXPERIMENT_NAME:+--experiment-name "$EXPERIMENT_NAME"} \
+    "$@"

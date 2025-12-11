@@ -19,10 +19,6 @@ from games.avalon.workflows.agentscope_cmt import AgentscopeCMT
 
 
 
-# TODO: 传入一个配置，并行玩几局游戏，兼容训练和评测
-# TODO： 如果训练的话，多传入Task，覆盖原先的task_config.yaml，主要包含要训练的模型&角色
-# TODO：评测脚本，起llm-server
-
 class RoleManager:
     """Manages role indexing and identification."""
     
@@ -169,7 +165,7 @@ class AvalonRolloutWorkflow(BaseAgentscopeWorkflow):
                 model_kwargs['generate_kwargs'] = generate_kwargs
             
             model = OpenAIChatModel(**model_kwargs)
-            model_name_for_tokenizer = model_config['model_name']
+            model_name_for_tokenizer = self.config.actor_rollout_ref.model.path
 
         
         # Calculate max_tokens for formatter (leave room for response)
