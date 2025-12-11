@@ -7,6 +7,11 @@
 # source /mnt/data/yunpeng.zyp/miniconda3/etc/profile.d/conda.sh
 # conda activate verl
 
+. /mnt/data/zouanni.zan/miniconda3/etc/profile.d/conda.sh;
+conda activate agentevolver
+
+cd /mnt/data/zouanni.zan/codes_dev/BeyondAgent
+
 PROJECT_DIR="$(pwd)"
 CONFIG_PATH="$PROJECT_DIR/config"
 TRAIN_TASKS_FILE="$PROJECT_DIR/games/avalon/train_tasks.parquet"
@@ -18,6 +23,10 @@ echo "Starting Avalon game training..."
 echo "Train tasks file: $TRAIN_TASKS_FILE"
 echo "Log file: $log_file"
 echo ""
+
+export API_KEY=""
+export DASHSCOPE_API_KEY=""
+export SWANLAB_API_KEY=""
 
 python3 -m agentevolver.main_ppo \
     --config-path="$PROJECT_DIR/examples/game/avalon" \
@@ -46,12 +55,12 @@ python3 -m agentevolver.main_ppo \
     data.val_type="val" \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
-    actor_rollout_ref.model.path=/mnt/data/yunpeng.zyp/models/Qwen3-4B \
+    actor_rollout_ref.model.path=/mnt/data_aisys_cpfs/xielipeng.xlp/models/Qwen3-4B \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.rollout.use_qwen3=False \
     actor_rollout_ref.rollout.enable_request_id=False \
-    actor_rollout_ref.rollout.prompt_length=20480 \
+    actor_rollout_ref.rollout.prompt_length=23532 \
     actor_rollout_ref.rollout.response_length=2048 \
     actor_rollout_ref.rollout.max_model_len=25580 \
     actor_rollout_ref.rollout.temperature=0.9 \

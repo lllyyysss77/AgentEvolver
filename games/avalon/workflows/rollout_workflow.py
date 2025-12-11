@@ -165,7 +165,7 @@ class AvalonRolloutWorkflow(BaseAgentscopeWorkflow):
                 model_kwargs['generate_kwargs'] = generate_kwargs
             
             model = OpenAIChatModel(**model_kwargs)
-            model_name_for_tokenizer = model_config['model_name']
+            model_name_for_tokenizer = self.config.actor_rollout_ref.model.path
 
         
         # Calculate max_tokens for formatter (leave room for response)

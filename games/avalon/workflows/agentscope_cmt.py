@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from agentevolver.module.context_manager.cmt_linear import Linear_CMT, ExtendedMessage
 from agentevolver.schema.trajectory import Reward
+from games.avalon.utils import Parser
 
 if TYPE_CHECKING:
     from agentevolver.schema.trajectory import Sample
@@ -89,7 +90,8 @@ class AgentscopeCMT(Linear_CMT):
                 ext_msg = ExtendedMessage(
                     author="initialization",  # Non-trainable: need_training=False
                     role=msg.get("role", "user"),
-                    content=str(msg.get_text_content()), # get text content in the text block
+                    content=Parser.extract_text_from_content(msg.get("content", "")),
+                    # content=str(msg.get_text_content()), # get text content in the text block
                     token_generator="manual",  # Use manual to compute context-based incremental tokens
                     tokenizer=self.tokenizer,
                 )

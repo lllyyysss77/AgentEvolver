@@ -25,9 +25,9 @@ roles:
   # minion:
   #   model_name: qwen-max
     
-  assassin:
-    url: http://localhost:8000/v1
-    model_name: local_model
+  # assassin:
+  #   url: http://localhost:8000/v1
+  #   model_name: local_model
 
 # Default model configuration
 # Used for roles not configured in roles, or as default values for optional parameters in roles
@@ -37,6 +37,6 @@ default_model:
   # model_name: qwen3-235b-a22b-instruct-2507
   temperature: 0.7
   max_tokens: 2048
-  stream: true
+  stream: false
   trainable: false
   act_by_user: false
