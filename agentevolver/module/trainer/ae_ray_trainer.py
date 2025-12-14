@@ -549,7 +549,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             self.train_task_manager._reward_config,
             self.config.task_manager.train_data_path,
             tokenizer=self.tokenizer,
-            config=self.config,
+            config=self.config.data,
             processor=self.processor,
         )
         self.val_dataset = FullDataset(
@@ -558,7 +558,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             self.val_task_manager._reward_config,
             cache_path=None,
             tokenizer=self.tokenizer,
-            config=self.config,
+            config=self.config.data,
             processor=self.processor,
         )
 
