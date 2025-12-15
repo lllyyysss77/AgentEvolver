@@ -7,14 +7,14 @@ from pydantic import BaseModel
 from agentscope.agent._user_input import UserInputBase, UserInputData
 from agentscope.message import TextBlock
 
-from games.web.game_state_manager import GameStateManager  #add gpt unified gsm
+from games.web.game_state_manager import GameStateManager
 
 
 class WebUserInput(UserInputBase):
-    """Web-based user input handler that waits for input from frontend via WebSocket."""
+    """Web 用户输入处理器：通过 WebSocket 等待前端输入"""
     
     def __init__(self, state_manager: GameStateManager):
-        self.state_manager = state_manager  #add gpt reuse unified gsm
+        self.state_manager = state_manager
     
     async def __call__(
         self,

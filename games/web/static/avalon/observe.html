@@ -4,7 +4,42 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Avalon Game - Observe Mode</title>
-    <link rel="stylesheet" href="/static/avalon/css/style.css?v=20251211_1">
+    <link rel="stylesheet" href="/static/avalon/css/style.css?v=20251214">
+    <!-- 早期初始化脚本：在页面渲染之前设置正确的显示状态和预加载数据 -->
+    <script>
+        window.__EARLY_INIT__ = { hasGameConfig: false, isGameRunning: false, config: null, portraits: null };
+        (function() {
+            try {
+                var gameConfigStr = sessionStorage.getItem('gameConfig');
+                var portraitsStr = sessionStorage.getItem('selectedPortraits');
+                var gameRunning = sessionStorage.getItem('gameRunning') === 'true';
+                
+                if (gameConfigStr) {
+                    window.__EARLY_INIT__.hasGameConfig = true;
+                    window.__EARLY_INIT__.config = JSON.parse(gameConfigStr);
+                    document.documentElement.classList.add('auto-start');
+                } else if (gameRunning) {
+                    window.__EARLY_INIT__.isGameRunning = true;
+                    document.documentElement.classList.add('auto-start');
+                } else {
+                    document.documentElement.classList.add('manual-start');
+                }
+                
+                if (portraitsStr) {
+                    window.__EARLY_INIT__.portraits = JSON.parse(portraitsStr);
+                }
+            } catch (e) {
+                document.documentElement.classList.add('manual-start');
+            }
+        })();
+    </script>
+    <style>
+        /* 根据初始状态隐藏/显示元素，避免闪烁 */
+        html.auto-start #game-setup { display: none !important; }
+        html.auto-start #messages-container { display: flex !important; }
+        html.manual-start #game-setup { display: block !important; }
+        html.manual-start #messages-container { display: none !important; }
+    </style>
 </head>
 <body>
     <div id="connection-status" class="connection-status connecting">🟡 Connecting...</div>
@@ -14,9 +49,9 @@
             <div class="header-controls">
                 <div class="header-label">Game: Avalon</div>
                 <div class="header-btn">Mode: Observer</div>
-                <a id="back-exit-button" class="header-btn" href="/" style="display:none">Exit</a>
+                <a id="back-exit-button" class="header-btn" href="/" style="display:none">← Exit</a>
             </div>
-            <div id="status-bar" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <div id="status-bar">
                 <span id="phase-display">Phase: -</span>
                 <span id="mission-display">Mission: -</span>
                 <span id="round-display">Round: -</span>
@@ -28,7 +63,7 @@
             <div class="map-container" id="game-visual-container">
                 <!-- Game Setup Form (Overlay) -->
                 <div id="game-setup" class="game-setup" style="display: none;">
-                    <h3>Game Configuration</h3>
+                    <h3>👁 Observer Setup</h3>
                     <div class="setup-form">
                         <label>
                             Number of Players:
@@ -48,13 +83,14 @@
                                 <option value="zh">Chinese</option>
                             </select>
                         </label>
-                        <button id="start-game-btn" class="start-button">Start Game</button>
+                        <button id="start-game-btn" class="start-button">Start Observing</button>
                     </div>
                 </div>
 
-                <!-- Game Visual -->
-                <div class="game-visual" style="width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background-color: black; overflow: hidden; border-radius: 8px;">
-                    <img src="/static/avalon/images/game_visual.gif" alt="Avalon Game Visual" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+                <!-- Pixel Table Scene -->
+                <div class="table-scene">
+                    <div class="pixel-table"></div>
+                    <div class="table-players" id="table-players"></div>
                 </div>
             </div>
             
@@ -62,7 +98,7 @@
                 <div class="panel logs-panel">
                     <h3>Chat</h3>
                     <div id="messages-container">
-                        <div style="text-align: center; color: #999; padding: 20px;">
+                        <div style="text-align: center; color: var(--muted); padding: 20px; font-size: 9px;">
                             Waiting for messages...
                         </div>
                     </div>

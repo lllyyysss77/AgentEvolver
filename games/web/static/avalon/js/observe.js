@@ -1,4 +1,22 @@
-// Observe mode JavaScript
+// Observe mode JavaScript - Pixel Town Style
+
+// 清除页面缓存：当离开游戏页面时清除游戏数据
+window.addEventListener('beforeunload', () => {
+    const keysToKeep = ['gameConfig', 'selectedPortraits', 'gameLanguage'];
+    Object.keys(sessionStorage).forEach(key => {
+        if (!keysToKeep.includes(key)) {
+            sessionStorage.removeItem(key);
+        }
+    });
+});
+
+// 强制不使用浏览器的 bfcache（后退/前进缓存）
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+        window.location.reload();
+    }
+});
+
 const wsClient = new WebSocketClient();
 const messagesContainer = document.getElementById('messages-container');
 const phaseDisplay = document.getElementById('phase-display');
@@ -10,52 +28,174 @@ const startGameBtn = document.getElementById('start-game-btn');
 const numPlayersSelect = document.getElementById('num-players');
 const languageSelect = document.getElementById('language');
 const backExitButton = document.getElementById('back-exit-button');
+const tablePlayers = document.getElementById('table-players');
 
 let messageCount = 0;
 let gameStarted = false;
+let numPlayers = 5;
+
+// 应用语言类到 body
+const gameLanguage = sessionStorage.getItem('gameLanguage') || 'en';
+document.body.classList.add(`lang-${gameLanguage}`);
+
+// 从早期初始化脚本或 sessionStorage 读取配置
+let selectedPortraits = [];
+if (window.__EARLY_INIT__ && window.__EARLY_INIT__.portraits) {
+    selectedPortraits = window.__EARLY_INIT__.portraits;
+} else {
+    try {
+        const stored = sessionStorage.getItem('selectedPortraits');
+        if (stored) selectedPortraits = JSON.parse(stored);
+    } catch (e) {}
+}
+
+// 从早期初始化读取 numPlayers
+if (window.__EARLY_INIT__ && window.__EARLY_INIT__.config) {
+    const config = window.__EARLY_INIT__.config;
+    if (config.num_players) {
+        numPlayers = typeof config.num_players === 'number'
+            ? config.num_players
+            : parseInt(config.num_players, 10);
+    }
+}
+
+// Portrait helper - 使用选择的头像映射
+function getPortraitSrc(playerId) {
+    // 防止 NaN，确保 playerId 是有效数字
+    const validId = (typeof playerId === 'number' && !isNaN(playerId)) ? playerId : 0;
+    
+    console.log(`getPortraitSrc (observe): playerId=${playerId}, validId=${validId}, selectedPortraits=`, selectedPortraits);
+    
+    // 如果有选择的头像，使用映射
+    if (selectedPortraits && selectedPortraits.length > validId) {
+        const portraitId = selectedPortraits[validId];
+        console.log(`Player ${validId} -> selectedPortraits[${validId}] = ${portraitId}`);
+        return `/static/portraits/portrait_${portraitId}.png`;
+    }
+    
+    // 否则使用默认映射
+    const id = (validId % 15) + 1;
+    console.log(`Player ${validId} using default portrait ${id}`);
+    return `/static/portraits/portrait_${id}.png`;
+}
+
+// Polar positions for table seating
+function polarPositions(count, radiusX, radiusY) {
+    return Array.from({ length: count }).map((_, i) => {
+        const angle = (Math.PI * 2 * i) / count - Math.PI / 2;
+        return { x: radiusX * Math.cos(angle), y: radiusY * Math.sin(angle) };
+    });
+}
+
+// Setup table players
+function setupTablePlayers(count) {
+    numPlayers = count;
+    tablePlayers.innerHTML = '';
+    
+    const rect = tablePlayers.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const radiusX = Math.min(210, Math.max(110, rect.width * 0.34));
+    const radiusY = Math.min(120, Math.max(70, rect.height * 0.30));
+    const positions = polarPositions(count, radiusX, radiusY);
+    
+    for (let i = 0; i < count; i++) {
+        const seat = document.createElement('div');
+        seat.className = 'seat';
+        seat.dataset.playerId = String(i);
+        seat.innerHTML = `
+            <div class="seat-label"></div>
+            <span class="id-tag">P${i}</span>
+            <img src="${getPortraitSrc(i)}" alt="Player ${i}">
+            <span class="name-tag">Player ${i}</span>
+            <div class="speech-bubble">💬</div>
+        `;
+        seat.style.left = `${cx + positions[i].x - 34}px`;
+        seat.style.top = `${cy + positions[i].y - 34}px`;
+        // 使用 CSS 变量保存基础旋转角度，让动画可以叠加抖动效果
+        const baseRotation = (i % 2 ? 1 : -1) * 2;
+        seat.style.setProperty('--base-rotation', `${baseRotation}deg`);
+        seat.style.transform = `rotate(var(--base-rotation, 0deg))`;
+        tablePlayers.appendChild(seat);
+    }
+}
+
+// Highlight speaking player with bubble animation
+function highlightSpeaker(playerId) {
+    document.querySelectorAll('.seat').forEach(seat => {
+        const isSpeaking = seat.dataset.playerId === String(playerId);
+        
+        if (isSpeaking && !seat.classList.contains('speaking')) {
+            // 重新触发气泡动画：先移除再添加
+            const bubble = seat.querySelector('.speech-bubble');
+            if (bubble) {
+                bubble.style.animation = 'none';
+                bubble.offsetHeight; // 强制 reflow
+                bubble.style.animation = '';
+            }
+        }
+        
+        seat.classList.toggle('speaking', isSpeaking);
+    });
+}
 
 function formatTime(timestamp) {
     if (!timestamp) return '';
     const date = new Date(timestamp);
-    return date.toLocaleTimeString();
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function addMessage(message) {
     messageCount++;
     
-    // Clear "waiting" message if this is the first message
     if (messageCount === 1) {
         messagesContainer.innerHTML = '';
     }
     
     const messageDiv = document.createElement('div');
-    messageDiv.className = 'message';
+    messageDiv.className = 'chat-message';
     
-    // Determine message class based on sender
+    let senderType = 'system';
+    let avatarHtml = '<div class="chat-avatar system">🎭</div>';
+    let senderName = message.sender || 'System';
+    let playerId = null;
+    
     if (message.sender === 'Moderator') {
-        messageDiv.classList.add('moderator');
+        senderType = 'moderator';
+        avatarHtml = '<div class="chat-avatar system">⚔</div>';
     } else if (message.sender && message.sender.startsWith('Player')) {
-        messageDiv.classList.add('agent');
-    } else {
-        messageDiv.classList.add('user');
+        senderType = 'agent';
+        // 支持 "Player0", "Player 0", "Player1" 等格式
+        const match = message.sender.match(/Player\s*(\d+)/);
+        if (match) {
+            playerId = parseInt(match[1], 10);
+            console.log(`Parsed playerId from sender "${message.sender}": ${playerId}`);
+            const portraitSrc = getPortraitSrc(playerId);
+            console.log(`Using portrait for Player${playerId}: ${portraitSrc}`);
+            avatarHtml = `<div class="chat-avatar"><img src="${portraitSrc}" alt="${senderName}"></div>`;
+            highlightSpeaker(playerId);
+        } else {
+            console.warn(`Failed to parse playerId from sender: "${message.sender}"`);
+            avatarHtml = '<div class="chat-avatar system">🎭</div>';
+        }
     }
     
     messageDiv.innerHTML = `
-        <div class="message-header">
-            <span class="message-sender">${escapeHtml(message.sender || 'System')}</span>
-            <span class="message-time">${formatTime(message.timestamp)}</span>
+        ${avatarHtml}
+        <div class="chat-bubble">
+            <div class="chat-header">
+                <span class="chat-sender ${senderType}">${escapeHtml(senderName)}</span>
+                <span class="chat-time">${formatTime(message.timestamp)}</span>
+            </div>
+            <div class="chat-content">${escapeHtml(message.content || '')}</div>
         </div>
-        <div class="message-content">${escapeHtml(message.content || '')}</div>
     `;
     
     messagesContainer.appendChild(messageDiv);
-    
-    // Auto-scroll to bottom
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
 function updateGameState(state) {
-    // Status bar similar to Diplomacy
     if (phaseDisplay) {
         const phases = ['Team Selection', 'Team Voting', 'Quest Voting', 'Assassination'];
         const phaseName = (state.phase !== null && state.phase !== undefined) ? (phases[state.phase] || 'Unknown') : '-';
@@ -70,12 +210,40 @@ function updateGameState(state) {
     if (statusDisplay) {
         statusDisplay.textContent = `Status: ${state.status ?? 'Waiting'}`;
     }
+    
+    if (state.num_players && state.num_players !== numPlayers) {
+        setupTablePlayers(state.num_players);
+    }
 }
 
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// 更新角色标签显示
+function updateRoleLabels(roles) {
+    // roles 格式: [{role_id, role_name, is_good}, ...] 或 [[role_id, role_name, is_good], ...]
+    if (!roles || !Array.isArray(roles)) {
+        return;
+    }
+    
+    roles.forEach((roleInfo, playerId) => {
+        // 支持两种格式：对象或数组
+        const roleName = roleInfo.role_name || roleInfo[1] || '';
+        
+        if (!roleName) return;
+        
+        const seat = tablePlayers.querySelector(`.seat[data-player-id="${playerId}"]`);
+        if (!seat) return;
+        
+        const label = seat.querySelector('.seat-label');
+        if (!label) return;
+        
+        label.textContent = roleName;
+        seat.classList.add('has-label');
+    });
 }
 
 // WebSocket message handlers
@@ -85,35 +253,35 @@ wsClient.onMessage('message', (message) => {
 
 wsClient.onMessage('game_state', (state) => {
     updateGameState(state);
-    // Show messages container when game starts
+    
+    // 如果状态中包含角色信息，更新座位标签
+    if (state.roles && Array.isArray(state.roles)) {
+        updateRoleLabels(state.roles);
+    }
+    
     if (state.status === 'running' && !gameStarted) {
         gameSetup.style.display = 'none';
-        messagesContainer.style.display = 'block';
+        messagesContainer.style.display = 'flex';
         gameStarted = true;
-        // Change button to Exit (stops game)
         updateBackExitButton('running');
     }
-    // Handle game stopped - reset state and show setup
     if (state.status === 'stopped') {
         gameStarted = false;
+        sessionStorage.removeItem('gameRunning');
         gameSetup.style.display = 'block';
         messagesContainer.style.display = 'none';
         updateBackExitButton('stopped');
-        // Reset message count and clear messages
         messageCount = 0;
-        messagesContainer.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">Game stopped. You can start a new game.</p>';
-        // Don't redirect - allow user to start new game or go back manually
+        messagesContainer.innerHTML = '<p style="text-align: center; color: var(--muted); padding: 20px; font-size: 9px;">Game stopped. You can start a new game.</p>';
     }
-    // Handle game finished - allow starting new game
     if (state.status === 'finished') {
-        // Game finished normally, can start new game
         gameStarted = false;
-        // Change button to Exit (goes back to home)
+        sessionStorage.removeItem('gameRunning');
         updateBackExitButton('finished');
     }
-    // Handle waiting state - show setup
     if (state.status === 'waiting') {
         gameStarted = false;
+        sessionStorage.removeItem('gameRunning');
         gameSetup.style.display = 'block';
         messagesContainer.style.display = 'none';
         updateBackExitButton('waiting');
@@ -129,21 +297,19 @@ wsClient.onMessage('mode_info', (info) => {
 
 wsClient.onMessage('error', (error) => {
     console.error('Error from server:', error);
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'message';
-    errorDiv.style.background = '#ffebee';
-    errorDiv.style.borderLeftColor = '#f44336';
-    errorDiv.innerHTML = `
-        <div class="message-header">
-            <span class="message-sender" style="color: #f44336;">Error</span>
-        </div>
-        <div class="message-content">${escapeHtml(error.message || 'Unknown error')}</div>
-    `;
-    messagesContainer.appendChild(errorDiv);
+    addMessage({
+        sender: 'System',
+        content: `Error: ${error.message || 'Unknown error'}`,
+        timestamp: new Date().toISOString()
+    });
+});
+
+numPlayersSelect.addEventListener('change', () => {
+    setupTablePlayers(parseInt(numPlayersSelect.value));
 });
 
 async function startGame() {
-    const numPlayers = parseInt(numPlayersSelect.value);
+    const np = parseInt(numPlayersSelect.value);
     const language = languageSelect.value;
     
     try {
@@ -152,12 +318,10 @@ async function startGame() {
         
         const response = await fetch('/api/start-game', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 game: 'avalon',
-                num_players: numPlayers,
+                num_players: np,
                 language: language,
                 mode: 'observe',
             }),
@@ -166,35 +330,28 @@ async function startGame() {
         const result = await response.json();
         
         if (response.ok) {
-            // Hide setup, show messages
             gameSetup.style.display = 'none';
-            messagesContainer.style.display = 'block';
-            gameStatusElement.textContent = 'Game starting...';
+            messagesContainer.style.display = 'flex';
             gameStarted = true;
         } else {
             alert(`Error: ${result.detail || 'Failed to start game'}`);
             startGameBtn.disabled = false;
-            startGameBtn.textContent = 'Start Game';
+            startGameBtn.textContent = 'Start Observing';
         }
     } catch (error) {
         console.error('Error starting game:', error);
         alert(`Error: ${error.message}`);
         startGameBtn.disabled = false;
-        startGameBtn.textContent = 'Start Game';
+        startGameBtn.textContent = 'Start Observing';
     }
 }
 
 function updateBackExitButton(gameStatus) {
-    // gameStatus can be: 'running', 'finished', 'stopped', 'waiting', or boolean (for backward compatibility)
-    let status = gameStatus;
-    if (typeof gameStatus === 'boolean') {
-        // Backward compatibility: convert boolean to status
-        status = gameStatus ? 'running' : 'waiting';
-    }
+    let status = typeof gameStatus === 'boolean' ? (gameStatus ? 'running' : 'waiting') : gameStatus;
     
     const goHome = () => { window.location.href = '/'; };
     if (status === 'running') {
-        backExitButton.textContent = 'Exit';
+        backExitButton.textContent = '← Exit';
         backExitButton.title = 'Exit Game';
         backExitButton.href = '#';
         backExitButton.style.display = 'inline-block';
@@ -218,36 +375,41 @@ function updateBackExitButton(gameStatus) {
 
 startGameBtn.addEventListener('click', startGame);
 
-// Connect when page loads
 wsClient.onConnect(() => {
     console.log('Connected to game server');
-    // When reconnected, reset game state
     gameStarted = false;
     messageCount = 0;
     
-    // Check if there's a game config from index.html
-    const gameConfig = sessionStorage.getItem('gameConfig');
-    if (gameConfig) {
-        console.log('Found game config, starting game automatically...');
-        sessionStorage.removeItem('gameConfig');
+    // 使用早期初始化的配置（首次启动）
+    if (window.__EARLY_INIT__ && window.__EARLY_INIT__.hasGameConfig && window.__EARLY_INIT__.config) {
+        console.log('Found game config from early init, starting game automatically...');
         
-        // Parse and start game
-        try {
-            const config = JSON.parse(gameConfig);
-            fetch('/api/start-game', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config)
-            }).then(resp => {
-                if (resp.ok) {
-                    console.log('Game started successfully');
-                } else {
-                    console.error('Failed to start game');
-                }
-            });
-        } catch (e) {
-            console.error('Failed to parse game config:', e);
-        }
+        const config = window.__EARLY_INIT__.config;
+        
+        // 清除 sessionStorage 中的 gameConfig
+        sessionStorage.removeItem('gameConfig');
+        // 设置游戏正在运行标记
+        sessionStorage.setItem('gameRunning', 'true');
+        // 清除早期初始化标记，防止重复启动
+        window.__EARLY_INIT__.hasGameConfig = false;
+        
+        // 启动游戏
+        fetch('/api/start-game', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        }).then(resp => {
+            if (resp.ok) {
+                console.log('Game started successfully');
+            } else {
+                console.error('Failed to start game');
+            }
+        });
+    }
+    // 刷新后重连
+    else if (window.__EARLY_INIT__ && window.__EARLY_INIT__.isGameRunning) {
+        console.log('Game was running, reconnecting...');
+        window.__EARLY_INIT__.isGameRunning = false;
     }
 });
 
@@ -255,8 +417,25 @@ wsClient.onDisconnect(() => {
     console.log('Disconnected from game server');
 });
 
-// Initialize connection
-wsClient.connect();
+// 初始化桌面并连接 WebSocket
+function initializeObserve() {
+    // 初始化圆桌（数据已在脚本开头从 __EARLY_INIT__ 或 sessionStorage 加载）
+    setupTablePlayers(numPlayers);
+    
+    // 连接 WebSocket
+    wsClient.connect();
+}
 
-// Initialize button to show "Back to Home" on page load
+// 等待 DOM 加载完成后初始化
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeObserve);
+} else {
+    // DOM 已经加载完成，立即执行
+    initializeObserve();
+}
+
 updateBackExitButton(false);
+
+window.addEventListener('resize', () => {
+    setupTablePlayers(numPlayers);
+});

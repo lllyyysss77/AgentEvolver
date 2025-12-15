@@ -15,11 +15,11 @@ import uvicorn
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from games.web.game_state_manager import GameStateManager  #add gpt import unified gsm
-from games.web.run_web_game import start_game_thread  #add gpt unified starter
+from games.web.game_state_manager import GameStateManager
+from games.web.run_web_game import start_game_thread
 
-# Global state manager
-state_manager = GameStateManager()  #add gpt single gsm
+# 全局游戏状态管理器
+state_manager = GameStateManager()
 
 app = FastAPI(title="Games Web Interface")
 
@@ -58,35 +58,38 @@ def _page(path: str):
 
 @app.get("/avalon/observe")
 async def avalon_observe_page():
-    return _page("avalon/observe.html")  #add gpt route avalon observe
+    """Avalon 观战页面"""
+    return _page("avalon/observe.html")
 
 
 @app.get("/avalon/participate")
 async def avalon_participate_page():
-    return _page("avalon/participate.html")  #add gpt route avalon participate
+    """Avalon 参与页面"""
+    return _page("avalon/participate.html")
 
 
 @app.get("/diplomacy/observe")
 async def dip_observe_page():
-    return _page("diplomacy/observe.html")  #add gpt route diplomacy observe
+    """Diplomacy 观战页面"""
+    return _page("diplomacy/observe.html")
 
 
 @app.get("/diplomacy/participate")
 async def dip_participate_page():
-    return _page("diplomacy/participate.html")  #add gpt route diplomacy participate
+    """Diplomacy 参与页面"""
+    return _page("diplomacy/participate.html")
 
 
 async def _handle_websocket_connection(websocket: WebSocket, path: str = ""):
-    """Common handler for WebSocket connections."""
+    """WebSocket 连接处理：接收用户输入，推送游戏状态和消息"""
     connection_id = str(uuid.uuid4())
     state_manager.add_websocket_connection(connection_id, websocket)
-    print(f"WebSocket connection established: {connection_id}")
     
     try:
         if state_manager.game_state.get("status") == "stopped":
             state_manager.reset()
-            print(f"[WebSocket] Reset game state from 'stopped' to 'waiting' for new connection")
         
+        # 发送当前游戏状态和模式信息
         await websocket.send_json(state_manager.format_game_state())
         await websocket.send_json({
             "type": "mode_info",
@@ -103,10 +106,8 @@ async def _handle_websocket_connection(websocket: WebSocket, path: str = ""):
                 if message.get("type") == "user_input":
                     agent_id = message.get("agent_id")
                     content = message.get("content", "")
-                    print(f"[WebSocket] Received user input: agent_id={agent_id}, content={content[:50]}...")
                     await state_manager.put_user_input(agent_id, content)
             except WebSocketDisconnect:
-                print(f"WebSocket disconnected: {connection_id}")
                 break
             except json.JSONDecodeError:
                 try:
@@ -120,9 +121,8 @@ async def _handle_websocket_connection(websocket: WebSocket, path: str = ""):
                     break
                 
     except WebSocketDisconnect:
-        print(f"WebSocket disconnected: {connection_id}")
+        pass
     except Exception as e:
-        print(f"WebSocket error: {e}")
         import traceback
         traceback.print_exc()
     finally:
@@ -131,12 +131,10 @@ async def _handle_websocket_connection(websocket: WebSocket, path: str = ""):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time communication."""
+    """WebSocket 端点：实时通信"""
     try:
         await websocket.accept()
-        print(f"WebSocket connection accepted from {websocket.client}")
     except Exception as e:
-        print(f"Error accepting WebSocket connection: {e}")
         import traceback
         traceback.print_exc()
         return
@@ -145,25 +143,29 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 class StartGameRequest(BaseModel):
+    """启动游戏请求参数"""
     game: str = "avalon"
     mode: str = "observe"
     language: str = "en"
-    # avalon
+    # Avalon 参数
     num_players: int = 5
     user_agent_id: int = 0
-    # diplomacy
+    preset_roles: list[dict] | None = None  # 前端预览后下发的固定角色分配
+    selected_portrait_ids: list[int] | None = None  # 前端选择的 portrait ids [1-15]
+    agent_configs: Dict[int, Dict[str, str]] | None = None  # 前端传递的 agent 配置 {portrait_id: {base_model, api_base, api_key}}
+    # Diplomacy 参数
     human_power: Optional[str] = None
     max_phases: int = 20
     negotiation_rounds: int = 3
+    power_names: list[str] | None = None  # 前端打乱后下发的 power 顺序
     power_models: Dict[str, str] | None = None
 
 
 @app.post("/api/start-game")
 async def start_game(request: StartGameRequest):
-    """Start the game for avalon or diplomacy."""
+    """启动游戏：在后台线程中运行 Avalon 或 Diplomacy"""
     game = request.game
     mode = request.mode
-    print(f"[API] Starting game: game={game}, mode={mode}")
     
     if game not in ["avalon", "diplomacy"]:
         raise HTTPException(status_code=400, detail="game must be 'avalon' or 'diplomacy'")
@@ -183,9 +185,13 @@ async def start_game(request: StartGameRequest):
         language=request.language,
         num_players=request.num_players,
         user_agent_id=request.user_agent_id,
+        preset_roles=request.preset_roles,
+        selected_portrait_ids=request.selected_portrait_ids,
+        agent_configs=request.agent_configs or {},
         human_power=request.human_power,
         max_phases=request.max_phases,
         negotiation_rounds=request.negotiation_rounds,
+        power_names=request.power_names,
         power_models=request.power_models or {},
     )
     
@@ -194,20 +200,31 @@ async def start_game(request: StartGameRequest):
 
 @app.post("/api/stop-game")
 async def stop_game():
-    """Stop the current game."""
-    print("[API] Stopping game")
-    
+    """停止当前游戏"""
     if state_manager.game_state.get("status") != "running":
         raise HTTPException(status_code=400, detail="No game is currently running")
     
     state_manager.stop_game()
+    
+    # 尝试取消asyncio任务
+    if hasattr(state_manager, '_game_task') and state_manager._game_task:
+        try:
+            state_manager._game_task.cancel()
+        except Exception:
+            pass
+    
     await state_manager.broadcast_message(state_manager.format_game_state())
+    
     stop_msg = state_manager.format_message(
         sender="System",
         content="Game stopped by user.",
         role="assistant",
     )
     await state_manager.broadcast_message(stop_msg)
+    
+    # 等待一小段时间让游戏线程有机会响应停止信号
+    import asyncio
+    await asyncio.sleep(0.1)
     
     return {"status": "ok", "message": "Game stopped"}
 
@@ -247,44 +264,128 @@ async def get_history_item(index: int):
 
 
 @app.get("/api/options")
-async def get_options(game: str = "diplomacy"):
-    """Options for diplomacy (callable before start-game)."""
-    if game != "diplomacy":
-        raise HTTPException(status_code=404, detail="options only for diplomacy")
-    from games.games.diplomacy.engine import DiplomacyConfig
-    cfg = DiplomacyConfig.default()
-    # Normalize language for UI select values (UI uses: en / zh)
-    lang = (cfg.language or "").lower().strip()
-    ui_language = "zh" if lang in {"zh", "zn", "cn", "zh-cn", "zh_cn", "chinese"} else "en"
-    all_models = set()
-    power_models = {}
-    if cfg.models:
-        for power in cfg.power_names:
-            m = cfg.models.get(power) or cfg.models.get("default") or {}
-            model_name = m.get("model_name", "qwen-plus")
-            power_models[power] = model_name
-            all_models.add(model_name)
-        for v in cfg.models.values():
-            if isinstance(v, dict) and v.get("model_name"):
-                all_models.add(v["model_name"])
-    else:
-        for power in cfg.power_names:
-            power_models[power] = "qwen-plus"
-        all_models = {"qwen-turbo", "qwen-plus", "qwen-max"}
-    return {
-        "powers": cfg.power_names,
-        "models": sorted(all_models),
-        "power_models": power_models,
-        "defaults": {
-            "mode": "observe",
-            "human_power": (cfg.power_names[0] if cfg.power_names else "ENGLAND"),
-            "model_name": cfg.models.get("default", {}).get("model_name", "qwen-plus") if cfg.models else "qwen-plus",
-            "max_phases": cfg.max_phases,
-            "map_name": cfg.map_name,
-            "negotiation_rounds": cfg.negotiation_rounds,
-            "language": ui_language,
-        },
-    }
+async def get_options(game: str | None = None):
+    """获取游戏配置选项：用于前端预填充
+    - 无 game 参数：返回 web_config.yaml 配置（角色名字等）
+    - game=avalon：返回 Avalon 默认配置
+    - game=diplomacy：返回 Diplomacy 配置（powers, models 等）
+    """
+    import os
+    import yaml
+
+    def _to_ui_lang(raw: str | None) -> str:
+        """语言代码标准化"""
+        lang = (raw or "").lower().strip()
+        return "zh" if lang in {"zh", "zn", "cn", "zh-cn", "zh_cn", "chinese"} else "en"
+
+    # 无 game 参数：返回 web_config.yaml
+    if not game:
+        web_config_path = os.path.join(os.path.dirname(__file__), "web_config.yaml")
+        result = {"portraits": {}, "default_model": {}}
+        try:
+            if os.path.exists(web_config_path):
+                with open(web_config_path, "r", encoding="utf-8") as f:
+                    web_cfg = yaml.safe_load(f) or {}
+                if isinstance(web_cfg, dict):
+                    result["portraits"] = web_cfg.get("portraits", {})
+                    default_model = web_cfg.get("default_model", {})
+                    if isinstance(default_model, dict):
+                        default_model = dict(default_model)
+                        # resolve ${API_KEY} from env
+                        api_key = default_model.get("api_key", "")
+                        if api_key and "${API_KEY}" in api_key:
+                            api_key = os.getenv("API_KEY", "")
+                        default_model["api_key"] = api_key
+                        if default_model.get("url") and not default_model.get("api_base"):
+                            default_model["api_base"] = default_model["url"]
+                        result["default_model"] = default_model
+        except Exception as e:
+            pass
+        return result
+
+    if game == "diplomacy":
+        from games.games.diplomacy.engine import DiplomacyConfig
+        cfg = DiplomacyConfig.default()
+
+        # 读取默认模型配置
+        yaml_path = os.environ.get("DIPLOMACY_CONFIG_YAML", "games/diplomacy/task_config.yaml")
+        default_model: dict = {}
+        try:
+            if os.path.exists(yaml_path):
+                with open(yaml_path, "r", encoding="utf-8") as f:
+                    yml = yaml.safe_load(f) or {}
+                if isinstance(yml, dict) and isinstance(yml.get("default_model"), dict):
+                    default_model = dict(yml["default_model"])
+        except Exception:
+            pass
+
+        # 标准化配置格式
+        if default_model.get("url") and not default_model.get("api_base"):
+            default_model["api_base"] = default_model["url"]
+        default_model.setdefault("api_key", os.getenv("API_KEY", ""))
+        all_models = set()
+        power_models = {}
+        if cfg.models:
+            for power in cfg.power_names:
+                m = cfg.models.get(power) or cfg.models.get("default") or {}
+                model_name = m.get("model_name", "qwen-plus")
+                power_models[power] = model_name
+                all_models.add(model_name)
+            for v in cfg.models.values():
+                if isinstance(v, dict) and v.get("model_name"):
+                    all_models.add(v["model_name"])
+        else:
+            for power in cfg.power_names:
+                power_models[power] = "qwen-plus"
+            all_models = {"qwen-turbo", "qwen-plus", "qwen-max"}
+
+        lang = _to_ui_lang(cfg.language)
+        return {
+            "powers": cfg.power_names,
+            "models": sorted(all_models),
+            "power_models": power_models,
+            "defaults": {
+                "mode": "observe",
+                "human_power": (cfg.power_names[0] if cfg.power_names else "ENGLAND"),
+                "model_name": (cfg.models.get("default", {}).get("model_name", "qwen-plus") if cfg.models else "qwen-plus"),
+                "max_phases": cfg.max_phases,
+                "map_name": cfg.map_name,
+                "negotiation_rounds": cfg.negotiation_rounds,
+                "language": lang,
+            },
+            "default_model": default_model,
+        }
+
+    if game == "avalon":
+        # 返回 Avalon 默认配置（预览/随机由前端处理）
+        yaml_path = os.environ.get("AVALON_CONFIG_YAML", "games/avalon/task_config.yaml")
+        default_model: dict = {}
+        game_defaults: dict = {}
+        try:
+            if os.path.exists(yaml_path):
+                with open(yaml_path, "r", encoding="utf-8") as f:
+                    yml = yaml.safe_load(f) or {}
+                if isinstance(yml, dict):
+                    if isinstance(yml.get("default_model"), dict):
+                        default_model = dict(yml["default_model"])
+                    if isinstance(yml.get("game"), dict):
+                        game_defaults = dict(yml["game"])
+        except Exception:
+            pass
+
+        if default_model.get("url") and not default_model.get("api_base"):
+            default_model["api_base"] = default_model["url"]
+        default_model.setdefault("api_key", os.getenv("API_KEY", ""))
+
+        return {
+            "defaults": {
+                "num_players": int(game_defaults.get("num_players", 5) or 5),
+                "language": _to_ui_lang(str(game_defaults.get("language", "en"))),
+            },
+            "default_model": default_model,
+        }
+
+    raise HTTPException(status_code=404, detail="options only for avalon/diplomacy")
 
 
 def get_state_manager() -> GameStateManager:

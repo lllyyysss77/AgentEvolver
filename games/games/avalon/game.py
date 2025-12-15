@@ -124,6 +124,20 @@ class AvalonGame:
 
         # Assign roles to agents
         await self._assign_roles_to_agents()
+        
+        # Broadcast roles to frontend for observe mode
+        if self.state_manager:
+            # Convert roles to serializable format (convert numpy int64 to Python int)
+            roles_data = [
+                {
+                    "role_id": int(role_id),
+                    "role_name": str(role_name),
+                    "is_good": bool(is_good)
+                }
+                for role_id, role_name, is_good in self.roles
+            ]
+            self.state_manager.update_game_state(roles=roles_data)
+            await self.state_manager.broadcast_message(self.state_manager.format_game_state())
 
         # Main game loop
         game_stopped = False
@@ -396,6 +410,7 @@ async def avalon_game(
     web_mode: str | None = None,
     web_observe_agent: AgentBase | None = None,
     state_manager: Any = None,
+    preset_roles: list[tuple[int, str, bool]] | None = None,  # added gpt
 ) -> bool:
     """Convenience function to run Avalon game.
     
@@ -420,6 +435,7 @@ async def avalon_game(
         language=language,
         observe_agent=web_observe_agent if web_mode == "observe" else None,
         state_manager=state_manager,
+        preset_roles=preset_roles,  # added gpt
     )
     
     # Run the game

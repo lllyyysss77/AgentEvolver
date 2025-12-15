@@ -78,7 +78,9 @@ class DiplomacyGame:
 
     def _assign_agents(self):
         """Assign powers to agents."""
-        power_names = list(self.game.powers.keys())
+        # 使用config.power_names来保持与前端传入的顺序一致
+        # 如果config中没有指定，则使用game.powers.keys()的默认顺序
+        power_names = self.config.power_names if self.config.power_names else list(self.game.powers.keys())
         for i, power_name in enumerate(power_names):
             if i < len(self.agents):
                 self.agents[i].power_name = power_name 

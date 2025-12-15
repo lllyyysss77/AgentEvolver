@@ -1,4 +1,24 @@
-// Participate mode JavaScript
+// Participate mode JavaScript - Pixel Town Style
+
+// 清除页面缓存：当离开游戏页面时清除游戏数据
+window.addEventListener('beforeunload', () => {
+    // 保留必要的配置数据，清除可能过期的游戏状态数据
+    const keysToKeep = ['gameConfig', 'selectedPortraits', 'gameLanguage'];
+    Object.keys(sessionStorage).forEach(key => {
+        if (!keysToKeep.includes(key)) {
+            sessionStorage.removeItem(key);
+        }
+    });
+});
+
+// 强制不使用浏览器的 bfcache（后退/前进缓存）
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+        // 页面从 bfcache 恢复，强制重新加载
+        window.location.reload();
+    }
+});
+
 const wsClient = new WebSocketClient();
 const messagesContainer = document.getElementById('messages-container');
 const phaseDisplay = document.getElementById('phase-display');
@@ -16,16 +36,205 @@ const userAgentIdSelect = document.getElementById('user-agent-id');
 const languageSelect = document.getElementById('language');
 const backExitButton = document.getElementById('back-exit-button');
 const inputContainer = document.querySelector('.input-container');
+const tablePlayers = document.getElementById('table-players');
 
 let messageCount = 0;
-let currentAgentId = null;
+let currentAgentId = null;  // 数字 player ID (0, 1, 2...)
+let currentAgentStringId = null;  // agentscope 的字符串 agent.id
 let waitingForInput = false;
 let gameStarted = false;
+let numPlayers = 5;
+
+// 应用语言类到 body
+const gameLanguage = sessionStorage.getItem('gameLanguage') || 'en';
+document.body.classList.add(`lang-${gameLanguage}`);
+
+// 从早期初始化脚本或 sessionStorage 读取配置
+// __EARLY_INIT__ 在 HTML <head> 中的脚本设置
+let selectedPortraits = [];
+if (window.__EARLY_INIT__ && window.__EARLY_INIT__.portraits) {
+    selectedPortraits = window.__EARLY_INIT__.portraits;
+} else {
+    try {
+        const stored = sessionStorage.getItem('selectedPortraits');
+        if (stored) selectedPortraits = JSON.parse(stored);
+    } catch (e) {}
+}
+
+// 从早期初始化或 sessionStorage 读取 gameConfig
+if (window.__EARLY_INIT__ && window.__EARLY_INIT__.config) {
+    const config = window.__EARLY_INIT__.config;
+    if (config.user_agent_id !== undefined) {
+        currentAgentId = typeof config.user_agent_id === 'number'
+            ? config.user_agent_id
+            : parseInt(config.user_agent_id, 10);
+    }
+    if (config.num_players) {
+        numPlayers = typeof config.num_players === 'number'
+            ? config.num_players
+            : parseInt(config.num_players, 10);
+    }
+} else {
+    try {
+        const gameConfigStr = sessionStorage.getItem('gameConfig');
+        if (gameConfigStr) {
+            const gameConfig = JSON.parse(gameConfigStr);
+            if (gameConfig.user_agent_id !== undefined) {
+                currentAgentId = typeof gameConfig.user_agent_id === 'number'
+                    ? gameConfig.user_agent_id
+                    : parseInt(gameConfig.user_agent_id, 10);
+            }
+            if (gameConfig.num_players) {
+                numPlayers = typeof gameConfig.num_players === 'number'
+                    ? gameConfig.num_players
+                    : parseInt(gameConfig.num_players, 10);
+            }
+        }
+    } catch (e) {}
+}
+
+// Portrait helper - 使用选择的头像映射
+function getPortraitSrc(playerId) {
+    // 确保 playerId 转换为数字
+    const validId = (typeof playerId === 'number' && !isNaN(playerId)) 
+        ? playerId 
+        : (typeof playerId === 'string' ? parseInt(playerId, 10) : 0);
+    
+    // 确保 currentAgentId 也是数字类型进行比较
+    const humanId = (currentAgentId !== null && currentAgentId !== undefined) 
+        ? (typeof currentAgentId === 'number' ? currentAgentId : parseInt(currentAgentId, 10))
+        : null;
+
+    // Participate 模式：人类玩家固定使用 portrait_human.png
+    if (humanId !== null && !isNaN(humanId) && !isNaN(validId) && validId === humanId) {
+        return `/static/portraits/portrait_human.png`;
+    }
+    
+    // AI 头像：selectedPortraits 是用户选择的 AI 头像列表
+    // 在 participate 模式下，selectedPortraits.length = numPlayers - 1（不包括人类玩家）
+    // 映射规则：AI 玩家按顺序使用 selectedPortraits，跳过人类玩家位置
+    if (selectedPortraits && selectedPortraits.length > 0) {
+        let idx = validId;
+        // 如果当前玩家在人类玩家之后，索引需要减1
+        if (humanId !== null && !isNaN(humanId) && validId > humanId) {
+            idx = validId - 1;
+        }
+        
+        // 确保索引在有效范围内
+        if (idx >= 0 && idx < selectedPortraits.length) {
+            const portraitId = selectedPortraits[idx];
+            return `/static/portraits/portrait_${portraitId}.png`;
+        }
+    }
+    
+    // 回退：使用默认映射
+    const id = (validId % 15) + 1;
+    return `/static/portraits/portrait_${id}.png`;
+}
+
+// Polar positions for table seating
+function polarPositions(count, radiusX, radiusY) {
+    return Array.from({ length: count }).map((_, i) => {
+        const angle = (Math.PI * 2 * i) / count - Math.PI / 2;
+        return { x: radiusX * Math.cos(angle), y: radiusY * Math.sin(angle) };
+    });
+}
+
+// Setup table players
+function setupTablePlayers(count) {
+    numPlayers = count;
+    tablePlayers.innerHTML = '';
+    
+    const rect = tablePlayers.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const radiusX = Math.min(210, Math.max(110, rect.width * 0.34));
+    const radiusY = Math.min(120, Math.max(70, rect.height * 0.30));
+    const positions = polarPositions(count, radiusX, radiusY);
+    
+    for (let i = 0; i < count; i++) {
+        const seat = document.createElement('div');
+        seat.className = 'seat';
+        seat.dataset.playerId = String(i);
+        
+        // 确保类型一致进行比较
+        const humanId = (currentAgentId !== null && currentAgentId !== undefined) 
+            ? (typeof currentAgentId === 'number' ? currentAgentId : parseInt(currentAgentId, 10))
+            : null;
+        const isHuman = (humanId !== null && !isNaN(humanId) && i === humanId);
+        const portraitSrc = getPortraitSrc(i);
+        
+        seat.innerHTML = `
+            <span class="id-tag">P${i}</span>
+            <img src="${portraitSrc}" alt="Player ${i}">
+            <span class="name-tag">${isHuman ? 'You' : `Player ${i}`}</span>
+            <div class="speech-bubble">💬</div>
+        `;
+        seat.style.left = `${cx + positions[i].x - 34}px`;
+        seat.style.top = `${cy + positions[i].y - 34}px`;
+        // 使用 CSS 变量保存基础旋转角度，让动画可以叠加抖动效果
+        const baseRotation = (i % 2 ? 1 : -1) * 2;
+        seat.style.setProperty('--base-rotation', `${baseRotation}deg`);
+        seat.style.transform = `rotate(var(--base-rotation, 0deg))`;
+        tablePlayers.appendChild(seat);
+    }
+}
+
+// Highlight speaking player with bubble animation
+function highlightSpeaker(playerId) {
+    document.querySelectorAll('.seat').forEach(seat => {
+        const seatPlayerId = seat.dataset.playerId;
+        const isSpeaking = seatPlayerId === String(playerId);
+        const wasSpeaking = seat.classList.contains('speaking');
+        
+        if (isSpeaking && !wasSpeaking) {
+            // 开始说话：添加 speaking 类并触发气泡动画
+            const bubble = seat.querySelector('.speech-bubble');
+            if (bubble) {
+                // 先移除 speaking 类（如果存在），重置动画
+                seat.classList.remove('speaking');
+                bubble.style.animation = 'none';
+                bubble.style.opacity = '0';
+                
+                // 使用 requestAnimationFrame 确保 DOM 更新后再添加类
+                requestAnimationFrame(() => {
+                    seat.classList.add('speaking');
+                    // 再次强制触发动画
+                    bubble.offsetHeight; // 强制 reflow
+                    bubble.style.animation = 'bubble-pop 2s ease-out forwards';
+                });
+            } else {
+                seat.classList.add('speaking');
+            }
+        } else if (!isSpeaking && wasSpeaking) {
+            // 停止说话：移除 speaking 类
+            seat.classList.remove('speaking');
+            const bubble = seat.querySelector('.speech-bubble');
+            if (bubble) {
+                // 立即隐藏气泡
+                bubble.style.animation = 'none';
+                bubble.style.opacity = '0';
+            }
+        }
+    });
+}
+
+// 清除所有玩家的 speaking 状态（用于主持人发言时）
+function clearAllSpeaking() {
+    document.querySelectorAll('.seat').forEach(seat => {
+        seat.classList.remove('speaking');
+        const bubble = seat.querySelector('.speech-bubble');
+        if (bubble) {
+            bubble.style.animation = 'none';
+            bubble.style.opacity = '0';
+        }
+    });
+}
 
 function formatTime(timestamp) {
     if (!timestamp) return '';
     const date = new Date(timestamp);
-    return date.toLocaleTimeString();
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function addMessage(message) {
@@ -37,23 +246,50 @@ function addMessage(message) {
     }
     
     const messageDiv = document.createElement('div');
-    messageDiv.className = 'message';
+    messageDiv.className = 'chat-message';
     
-    // Determine message class based on sender
+    // Determine sender type and get avatar
+    let senderType = 'system';
+    let avatarHtml = '<div class="chat-avatar system">🎭</div>';
+    let senderName = message.sender || 'System';
+    let playerId = null;
+    
     if (message.sender === 'Moderator') {
-        messageDiv.classList.add('moderator');
+        senderType = 'moderator';
+        avatarHtml = '<div class="chat-avatar system">⚔</div>';
+        // 主持人发言时，清除所有玩家的 speaking 状态
+        clearAllSpeaking();
     } else if (message.sender && message.sender.startsWith('Player')) {
-        messageDiv.classList.add('agent');
-    } else {
-        messageDiv.classList.add('user');
+        senderType = 'agent';
+        // 支持 "Player0", "Player 0", "Player1" 等格式
+        const match = message.sender.match(/Player\s*(\d+)/);
+        if (match) {
+            playerId = parseInt(match[1], 10);
+            console.log(`Parsed playerId from sender "${message.sender}": ${playerId}`);
+            const portraitSrc = getPortraitSrc(playerId);
+            console.log(`Using portrait for Player${playerId}: ${portraitSrc}`);
+            avatarHtml = `<div class="chat-avatar"><img src="${portraitSrc}" alt="${senderName}"></div>`;
+            // Highlight this player at the table
+            highlightSpeaker(playerId);
+        } else {
+            console.warn(`Failed to parse playerId from sender: "${message.sender}"`);
+            avatarHtml = '<div class="chat-avatar system">🎭</div>';
+        }
+    } else if (message.sender === 'You' || message.role === 'user') {
+        senderType = 'user';
+        messageDiv.classList.add('own');
+        avatarHtml = `<div class="chat-avatar"><img src="${getPortraitSrc(currentAgentId || 0)}" alt="You"></div>`;
     }
     
     messageDiv.innerHTML = `
-        <div class="message-header">
-            <span class="message-sender">${escapeHtml(message.sender || 'System')}</span>
-            <span class="message-time">${formatTime(message.timestamp)}</span>
+        ${avatarHtml}
+        <div class="chat-bubble">
+            <div class="chat-header">
+                <span class="chat-sender ${senderType}">${escapeHtml(senderName)}</span>
+                <span class="chat-time">${formatTime(message.timestamp)}</span>
+            </div>
+            <div class="chat-content">${escapeHtml(message.content || '')}</div>
         </div>
-        <div class="message-content">${escapeHtml(message.content || '')}</div>
     `;
     
     messagesContainer.appendChild(messageDiv);
@@ -63,7 +299,7 @@ function addMessage(message) {
 }
 
 function updateGameState(state) {
-    // Status bar similar to Diplomacy
+    // Status bar
     if (phaseDisplay) {
         const phases = ['Team Selection', 'Team Voting', 'Quest Voting', 'Assassination'];
         const phaseName = (state.phase !== null && state.phase !== undefined) ? (phases[state.phase] || 'Unknown') : '-';
@@ -78,10 +314,16 @@ function updateGameState(state) {
     if (statusDisplay) {
         statusDisplay.textContent = `Status: ${state.status ?? 'Waiting'}`;
     }
+    
+    // Update table if num_players changed
+    if (state.num_players && state.num_players !== numPlayers) {
+        setupTablePlayers(state.num_players);
+    }
 }
 
 function showInputRequest(agentId, prompt) {
-    currentAgentId = agentId;
+    // 保存 agentscope 的字符串 agent.id（用于发送消息）
+    currentAgentStringId = agentId;
     waitingForInput = true;
     inputPrompt.textContent = prompt;
     userInputRequest.style.display = 'block';
@@ -100,20 +342,28 @@ function hideInputRequest() {
 
 function sendUserInput() {
     const content = userInputElement.value.trim();
-    if (!content || !currentAgentId) {
+    if (!content) return;
+    
+    if (!currentAgentStringId) {
+        alert('Error: Agent ID not set. Please refresh the page.');
         return;
     }
     
-    wsClient.sendUserInput(currentAgentId, content);
+    wsClient.sendUserInput(currentAgentStringId, content);
     hideInputRequest();
     
-    // Show user's input in messages
+    // Show user's input in messages and trigger speaking animation
     addMessage({
         sender: 'You',
         content: content,
         role: 'user',
         timestamp: new Date().toISOString()
     });
+    
+    // Trigger speaking animation for human player
+    if (currentAgentId !== null && currentAgentId !== undefined) {
+        highlightSpeaker(currentAgentId);
+    }
 }
 
 function escapeHtml(text) {
@@ -142,35 +392,33 @@ wsClient.onMessage('game_state', (state) => {
     // Show messages container when game starts
     if (state.status === 'running' && !gameStarted) {
         gameSetup.style.display = 'none';
-        messagesContainer.style.display = 'block';
+        messagesContainer.style.display = 'flex';
         inputContainer.style.display = 'flex';
         gameStarted = true;
-        // Change button to Exit (stops game)
         updateBackExitButton('running');
     }
-    // Handle game stopped - reset state and show setup
+    // Handle game stopped
     if (state.status === 'stopped') {
         gameStarted = false;
+        sessionStorage.removeItem('gameRunning');  // 清除游戏运行标记
         gameSetup.style.display = 'block';
         messagesContainer.style.display = 'none';
         inputContainer.style.display = 'none';
         hideInputRequest();
         updateBackExitButton('stopped');
-        // Reset message count and clear messages
         messageCount = 0;
-        messagesContainer.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">Game stopped. You can start a new game.</p>';
-        // Don't redirect - allow user to start new game or go back manually
+        messagesContainer.innerHTML = '<p style="text-align: center; color: var(--muted); padding: 20px; font-size: 9px;">Game stopped. You can start a new game.</p>';
     }
-    // Handle game finished - allow starting new game
+    // Handle game finished
     if (state.status === 'finished') {
-        // Game finished normally, can start new game
         gameStarted = false;
-        // Change button to Exit (goes back to home)
+        sessionStorage.removeItem('gameRunning');  // 清除游戏运行标记
         updateBackExitButton('finished');
     }
-    // Handle waiting state - show setup
+    // Handle waiting state
     if (state.status === 'waiting') {
         gameStarted = false;
+        sessionStorage.removeItem('gameRunning');  // 清除游戏运行标记
         gameSetup.style.display = 'block';
         messagesContainer.style.display = 'none';
         inputContainer.style.display = 'none';
@@ -188,40 +436,42 @@ wsClient.onMessage('mode_info', (info) => {
     if (info.mode !== 'participate') {
         console.warn('Expected participate mode, got:', info.mode);
     }
-    if (info.user_agent_id) {
-        currentAgentId = info.user_agent_id;
+    // 只有当 currentAgentId 还没有设置时，才从 mode_info 更新
+    // 防止覆盖已经正确设置的值
+    if (info.user_agent_id !== undefined && currentAgentId === null) {
+        currentAgentId = typeof info.user_agent_id === 'number'
+            ? info.user_agent_id
+            : parseInt(info.user_agent_id, 10);
+        console.log('Setting currentAgentId from mode_info:', info.user_agent_id, '->', currentAgentId);
+        // 只有在这种情况下才需要重新设置桌面
+        setupTablePlayers(numPlayers);
     }
 });
 
 wsClient.onMessage('error', (error) => {
     console.error('Error from server:', error);
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'message';
-    errorDiv.style.background = '#ffebee';
-    errorDiv.style.borderLeftColor = '#f44336';
-    errorDiv.innerHTML = `
-        <div class="message-header">
-            <span class="message-sender" style="color: #f44336;">Error</span>
-        </div>
-        <div class="message-content">${escapeHtml(error.message || 'Unknown error')}</div>
-    `;
-    messagesContainer.appendChild(errorDiv);
+    addMessage({
+        sender: 'System',
+        content: `Error: ${error.message || 'Unknown error'}`,
+        timestamp: new Date().toISOString()
+    });
 });
 
 // Update user agent ID options based on num players
 numPlayersSelect.addEventListener('change', () => {
-    const numPlayers = parseInt(numPlayersSelect.value);
+    const np = parseInt(numPlayersSelect.value);
     userAgentIdSelect.innerHTML = '';
-    for (let i = 0; i < numPlayers; i++) {
+    for (let i = 0; i < np; i++) {
         const option = document.createElement('option');
         option.value = i;
         option.textContent = i;
         userAgentIdSelect.appendChild(option);
     }
+    setupTablePlayers(np);
 });
 
 async function startGame() {
-    const numPlayers = parseInt(numPlayersSelect.value);
+    const np = parseInt(numPlayersSelect.value);
     const userAgentId = parseInt(userAgentIdSelect.value);
     const language = languageSelect.value;
     
@@ -231,12 +481,10 @@ async function startGame() {
         
         const response = await fetch('/api/start-game', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 game: 'avalon',
-                num_players: numPlayers,
+                num_players: np,
                 language: language,
                 user_agent_id: userAgentId,
                 mode: 'participate',
@@ -246,11 +494,12 @@ async function startGame() {
         const result = await response.json();
         
         if (response.ok) {
-            // Hide setup, show messages and input
+            currentAgentId = typeof userAgentId === 'number' ? userAgentId : parseInt(userAgentId, 10);
+            console.log('Game started, setting currentAgentId:', userAgentId, '->', currentAgentId);
+            setupTablePlayers(np);
             gameSetup.style.display = 'none';
-            messagesContainer.style.display = 'block';
+            messagesContainer.style.display = 'flex';
             inputContainer.style.display = 'flex';
-            gameStatusElement.textContent = 'Game starting...';
             gameStarted = true;
         } else {
             alert(`Error: ${result.detail || 'Failed to start game'}`);
@@ -266,16 +515,11 @@ async function startGame() {
 }
 
 function updateBackExitButton(gameStatus) {
-    // gameStatus can be: 'running', 'finished', 'stopped', 'waiting', or boolean (for backward compatibility)
-    let status = gameStatus;
-    if (typeof gameStatus === 'boolean') {
-        // Backward compatibility: convert boolean to status
-        status = gameStatus ? 'running' : 'waiting';
-    }
+    let status = typeof gameStatus === 'boolean' ? (gameStatus ? 'running' : 'waiting') : gameStatus;
     
     const goHome = () => { window.location.href = '/'; };
     if (status === 'running') {
-        backExitButton.textContent = 'Exit';
+        backExitButton.textContent = '← Exit';
         backExitButton.title = 'Exit Game';
         backExitButton.href = '#';
         backExitButton.style.display = 'inline-block';
@@ -302,34 +546,41 @@ startGameBtn.addEventListener('click', startGame);
 // Connect when page loads
 wsClient.onConnect(() => {
     console.log('Connected to game server');
-    // When reconnected, reset game state
     gameStarted = false;
     messageCount = 0;
     hideInputRequest();
     
-    // Check if there's a game config from index.html
-    const gameConfig = sessionStorage.getItem('gameConfig');
-    if (gameConfig) {
-        console.log('Found game config, starting game automatically...');
-        sessionStorage.removeItem('gameConfig');
+    // 使用早期初始化的配置（首次启动）
+    if (window.__EARLY_INIT__ && window.__EARLY_INIT__.hasGameConfig && window.__EARLY_INIT__.config) {
+        console.log('Found game config from early init, starting game automatically...');
         
-        // Parse and start game
-        try {
-            const config = JSON.parse(gameConfig);
-            fetch('/api/start-game', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config)
-            }).then(resp => {
-                if (resp.ok) {
-                    console.log('Game started successfully');
-                } else {
-                    console.error('Failed to start game');
-                }
-            });
-        } catch (e) {
-            console.error('Failed to parse game config:', e);
-        }
+        const config = window.__EARLY_INIT__.config;
+        
+        // 清除 sessionStorage 中的 gameConfig
+        sessionStorage.removeItem('gameConfig');
+        // 设置游戏正在运行标记（用于刷新后重连）
+        sessionStorage.setItem('gameRunning', 'true');
+        // 清除早期初始化标记，防止重复启动
+        window.__EARLY_INIT__.hasGameConfig = false;
+        
+        // 启动游戏
+        fetch('/api/start-game', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        }).then(resp => {
+            if (resp.ok) {
+                console.log('Game started successfully');
+            } else {
+                console.error('Failed to start game');
+            }
+        });
+    }
+    // 刷新后重连（游戏已在运行）
+    else if (window.__EARLY_INIT__ && window.__EARLY_INIT__.isGameRunning) {
+        console.log('Game was running, reconnecting...');
+        // 不需要启动游戏，只需要等待服务器发送状态
+        window.__EARLY_INIT__.isGameRunning = false;
     }
 });
 
@@ -338,8 +589,27 @@ wsClient.onDisconnect(() => {
     hideInputRequest();
 });
 
-// Initialize connection
-wsClient.connect();
+// 初始化桌面并连接 WebSocket
+function initializeTable() {
+    // 初始化圆桌（数据已在脚本开头从 __EARLY_INIT__ 或 sessionStorage 加载）
+    setupTablePlayers(numPlayers);
+    
+    // 连接 WebSocket
+    wsClient.connect();
+}
 
-// Initialize button to show "Back to Home" on page load
+// 如果 DOM 已经加载完成，立即执行；否则等待 DOMContentLoaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeTable);
+} else {
+    // DOM 已经加载完成，立即执行
+    initializeTable();
+}
+
+// Initialize button
 updateBackExitButton(false);
+
+// Handle window resize
+window.addEventListener('resize', () => {
+    setupTablePlayers(numPlayers);
+});

@@ -4,29 +4,30 @@ from typing import Any
 from agentscope.agent import AgentBase, UserAgent
 from agentscope.message import Msg
 
-from games.web.game_state_manager import GameStateManager  #add gpt unified gsm
-from games.web.web_user_input import WebUserInput  #add gpt unified user input
-from games.games.avalon.utils import Parser as AvalonParser  #add gpt import Avalon parser for content extraction
+from games.web.game_state_manager import GameStateManager
+from games.web.web_user_input import WebUserInput
+from games.games.avalon.utils import Parser as AvalonParser
 
 
 class WebUserAgent(UserAgent):
-    """Web-based UserAgent that syncs observations to frontend and uses WebUserInput."""
+    """Web 用户代理：同步观察结果到前端，使用 WebUserInput 处理用户输入"""
     
     def __init__(self, name: str, state_manager: GameStateManager):
         super().__init__(name=name)
         self.state_manager = state_manager
         self.agent_id = self.id
-        web_input = WebUserInput(state_manager)  #add gpt unified user input for both games
+        web_input = WebUserInput(state_manager)
         self.override_instance_input_method(web_input)
     
     async def observe(self, msg: Msg | list[Msg] | None) -> None:
+        """观察消息并广播到前端（仅参与模式）"""
         await super().observe(msg)
         if self.state_manager.mode != "participate" or msg is None:
             return
         messages = msg if isinstance(msg, list) else [msg]
         for m in messages:
             if isinstance(m, Msg):
-                content = AvalonParser.extract_text_from_content(m.content)  #add gpt extract text from complex content structure
+                content = AvalonParser.extract_text_from_content(m.content)
                 sender = m.name
                 role = m.role
             else:
@@ -44,7 +45,7 @@ class WebUserAgent(UserAgent):
 
 
 class ObserveAgent(AgentBase):
-    """Observer agent that forwards all messages to frontend."""
+    """观察者代理：将所有消息转发到前端"""
     
     def __init__(self, name: str, state_manager: GameStateManager, **kwargs):
         super().__init__(**kwargs)
@@ -52,10 +53,11 @@ class ObserveAgent(AgentBase):
         self.state_manager = state_manager
     
     async def observe(self, msg: Msg | list[Msg] | None) -> None:
+        """观察消息并广播到前端"""
         messages = msg if isinstance(msg, list) else [msg]
         for m in messages:
             if isinstance(m, Msg):
-                content = AvalonParser.extract_text_from_content(m.content)  #add gpt extract text from complex content structure
+                content = AvalonParser.extract_text_from_content(m.content)
                 sender = m.name
             else:
                 content = str(m)
@@ -65,5 +67,6 @@ class ObserveAgent(AgentBase):
             )
     
     def reply(self, x: dict = None) -> Msg:
-        return Msg(self.name, content="", role="assistant")  #add gpt observer dummy reply
+        """观察者不参与游戏，返回空消息"""
+        return Msg(self.name, content="", role="assistant")
 

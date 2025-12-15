@@ -17,8 +17,8 @@ from agentscope.memory import InMemoryMemory
 from agentscope.formatter import DashScopeMultiAgentFormatter
 from agentscope.tool import Toolkit
 
-from games.web.game_state_manager import GameStateManager  #add gpt unified gsm
-from games.web.web_agent import WebUserAgent, ObserveAgent  #add gpt unified agents
+from games.web.game_state_manager import GameStateManager
+from games.web.web_agent import WebUserAgent, ObserveAgent
 
 # Avalon imports
 from games.agents.thinking_react_agent import ThinkingReActAgent
@@ -36,12 +36,29 @@ async def run_avalon(
     language: str,
     user_agent_id: int,
     mode: str,
+    preset_roles: list[tuple[int, str, bool]] | None = None,
+    selected_portrait_ids: list[int] | None = None,
+    agent_configs: Dict[int, Dict[str, str]] | None = None,
 ):
-    """Run Avalon game."""
+    """运行 Avalon 游戏"""
     config = AvalonBasicConfig.from_num_players(num_players)
 
-    model_name = os.getenv("MODEL_NAME", "qwen-plus")
-    api_key = os.getenv("API_KEY", "sk-224e008372e144e496e06038077f65fc")
+    # 读取 web_config.yaml 中每个 portrait 的模型配置
+    import yaml
+    web_config_path = os.path.join(os.path.dirname(__file__), "web_config.yaml")
+    web_config = {}
+    try:
+        if os.path.exists(web_config_path):
+            with open(web_config_path, "r", encoding="utf-8") as f:
+                web_config = yaml.safe_load(f) or {}
+    except Exception:
+        pass
+    
+    default_model = web_config.get("default_model", {})
+    portraits = web_config.get("portraits", {})
+    
+    if not selected_portrait_ids:
+        selected_portrait_ids = list(range(1, num_players + 1))
 
     agents = []
     observe_agent = None
@@ -51,9 +68,39 @@ async def run_avalon(
     for i in range(num_players):
         if mode == "participate" and i == user_agent_id:
             agent = WebUserAgent(name=f"Player{i}", state_manager=state_manager)
-            print(f"Created {agent.name} (WebUserAgent - interactive)")
         else:
-            model = DashScopeChatModel(model_name=model_name, api_key=api_key, stream=False)
+            # 优先使用前端传递的 agent 配置，否则从 web_config.yaml 读取
+            portrait_id = selected_portrait_ids[i] if i < len(selected_portrait_ids) else (i + 1)
+            
+            # 先尝试使用前端传递的配置
+            frontend_cfg = None
+            if agent_configs and portrait_id in agent_configs:
+                frontend_cfg = agent_configs[portrait_id]
+            
+            if frontend_cfg and frontend_cfg.get("base_model"):
+                model_name = frontend_cfg.get("base_model", os.getenv("MODEL_NAME", "qwen-plus"))
+                api_base = frontend_cfg.get("api_base", "")
+                api_key = frontend_cfg.get("api_key", os.getenv("API_KEY", ""))
+            else:
+                portrait_cfg = portraits.get(str(portrait_id), {}) if isinstance(portraits, dict) else {}
+                merged_cfg = dict(default_model)
+                if isinstance(portrait_cfg, dict):
+                    merged_cfg.update(portrait_cfg)
+                
+                api_key_raw = merged_cfg.get("api_key", "")
+                if "${API_KEY}" in str(api_key_raw):
+                    api_key_raw = os.getenv("API_KEY", "")
+                
+                model_name = merged_cfg.get("model_name", os.getenv("MODEL_NAME", "qwen-plus"))
+                api_key = api_key_raw or os.getenv("API_KEY", "")
+                api_base = merged_cfg.get("api_base", "")
+            
+            # 根据 api_base 决定使用哪个模型类
+            if api_base and "openai" in api_base.lower():
+                from agentscope.model import OpenAIChatModel
+                model = OpenAIChatModel(model_name=model_name, api_key=api_key, api_base=api_base, stream=False)
+            else:
+                model = DashScopeChatModel(model_name=model_name, api_key=api_key, stream=False)
             agent = ThinkingReActAgent(
                 name=f"Player{i}",
                 sys_prompt="",
@@ -62,10 +109,9 @@ async def run_avalon(
                 memory=InMemoryMemory(),
                 toolkit=Toolkit(),
             )
-            print(f"Created {agent.name} (ThinkingReActAgent)")
         agents.append(agent)
 
-    state_manager.set_mode(mode, str(user_agent_id) if mode == "participate" else None, game="avalon")  #add gpt set game avalon
+    state_manager.set_mode(mode, str(user_agent_id) if mode == "participate" else None, game="avalon")
     state_manager.update_game_state(status="running")
     await state_manager.broadcast_message(state_manager.format_game_state())
 
@@ -80,6 +126,7 @@ async def run_avalon(
         web_mode=mode,
         web_observe_agent=observe_agent,
         state_manager=state_manager,
+        preset_roles=preset_roles,
     )
 
     if good_wins is None or state_manager.should_stop:
@@ -101,6 +148,8 @@ async def run_diplomacy(
     state_manager: GameStateManager,
     config: DiplomacyConfig,
     mode: str,
+    selected_portrait_ids: list[int] | None = None,
+    agent_configs: Dict[int, Dict[str, str]] | None = None,
 ):
     """Run Diplomacy game."""
     agentscope.init()
@@ -113,16 +162,38 @@ async def run_diplomacy(
     if mode == "observe":
         observe_agent = ObserveAgent(name="Observer", state_manager=state_manager)
 
-    for power in config.power_names:
+    for power_idx, power in enumerate(config.power_names):
         if mode == "participate" and config.human_power and power == config.human_power:
             agent = WebUserAgent(name=power, state_manager=state_manager)
             state_manager.user_agent_id = agent.id
-            print(f"Created {agent.name} (WebUserAgent - interactive)")
         else:
-            model_cfg = (config.models or {}).get(power, (config.models or {}).get("default", {}))
-            model_name = model_cfg.get("model_name", model_name_default)
-            api_key = model_cfg.get("api_key", api_key_default)
-            if "gpt" in model_name:
+            # 优先使用前端传递的 agent 配置
+            portrait_id = None
+            frontend_cfg = None
+            if selected_portrait_ids and power_idx < len(selected_portrait_ids):
+                portrait_id = selected_portrait_ids[power_idx]
+                # 跳过占位符（-1 表示 human player 或空位）
+                if portrait_id is not None and portrait_id != -1:
+                    if agent_configs and portrait_id in agent_configs:
+                        frontend_cfg = agent_configs[portrait_id]
+                else:
+                    portrait_id = None  # 将占位符转换为 None 以便调试输出
+            
+            if frontend_cfg and frontend_cfg.get("base_model"):
+                model_name = frontend_cfg.get("base_model", model_name_default)
+                api_base = frontend_cfg.get("api_base", "")
+                api_key = frontend_cfg.get("api_key", api_key_default)
+            else:
+                model_cfg = (config.models or {}).get(power, (config.models or {}).get("default", {}))
+                model_name = model_cfg.get("model_name", model_name_default)
+                api_key = model_cfg.get("api_key", api_key_default)
+                api_base = model_cfg.get("api_base", "")
+            
+            # 根据 api_base 和 model_name 决定使用哪个模型类
+            if api_base and "openai" in api_base.lower():
+                from agentscope.model import OpenAIChatModel
+                model = OpenAIChatModel(model_name=model_name, api_key=api_key, api_base=api_base, stream=False)
+            elif "gpt" in model_name.lower():
                 from agentscope.model import OpenAIChatModel
                 model = OpenAIChatModel(model_name=model_name, api_key=api_key, stream=False)
             else:
@@ -137,14 +208,13 @@ async def run_diplomacy(
             )
             agent.power_name = power
             agent.set_console_output_enabled(True)
-            print(f"Created {agent.name} (ThinkingReActAgent, model={model_name})")
         agents.append(agent)
 
-    state_manager.set_mode(mode, config.human_power if mode == "participate" else None, game="diplomacy")  #add gpt set game diplomacy
+    state_manager.set_mode(mode, config.human_power if mode == "participate" else None, game="diplomacy")
     state_manager.update_game_state(status="running", human_power=config.human_power if mode == "participate" else None)
     await state_manager.broadcast_message(state_manager.format_game_state())
 
-    log_dir = os.getenv("LOG_DIR", os.path.join(os.path.dirname(__file__), "logs"))
+    log_dir = os.getenv("LOG_DIR", "logs")
     os.makedirs(log_dir, exist_ok=True)
 
     result = await diplomacy_game(
@@ -173,38 +243,107 @@ def start_game_thread(
     language: str = "en",
     num_players: int = 5,
     user_agent_id: int = 0,
+    preset_roles: list[dict] | None = None,
+    selected_portrait_ids: list[int] | None = None,
+    agent_configs: Dict[int, Dict[str, str]] | None = None,
     human_power: str | None = None,
     max_phases: int = 20,
     negotiation_rounds: int = 3,
+    power_names: list[str] | None = None,
     power_models: Dict[str, str] | None = None,
 ):
-    """Start game in a separate thread."""
+    """在后台线程中启动游戏"""
     def run():
-        if game == "avalon":
-            asyncio.run(run_avalon(
-                state_manager=state_manager,
-                num_players=num_players,
-                language=language,
-                user_agent_id=user_agent_id,
-                mode=mode,
-            ))
-        else:
-            cfg = DiplomacyConfig.default()
-            cfg.max_phases = max_phases
-            cfg.negotiation_rounds = negotiation_rounds
-            cfg.language = language
-            cfg.human_power = human_power
-            if power_models:
-                cfg.models = cfg.models or {}
-                for k, v in power_models.items():
-                    cfg.models[k] = {"model_name": v}
-            asyncio.run(run_diplomacy(
-                state_manager=state_manager,
-                config=cfg,
-                mode=mode,
-            ))
+        try:
+            # 创建新的事件循环（每个线程需要自己的事件循环）
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            if game == "avalon":
+                # 解析前端传入的角色分配
+                preset_roles_tuples: list[tuple[int, str, bool]] | None = None
+                if preset_roles:
+                    try:
+                        preset_roles_tuples = [
+                            (int(x.get("role_id")), str(x.get("role_name")), bool(x.get("is_good")))
+                            for x in preset_roles
+                            if isinstance(x, dict)
+                        ]
+                    except Exception:
+                        pass
+                
+                portrait_ids = selected_portrait_ids if selected_portrait_ids else list(range(1, num_players + 1))
+                
+                # 创建任务并保存引用，以便可以取消
+                task = loop.create_task(run_avalon(
+                    state_manager=state_manager,
+                    num_players=num_players,
+                    language=language,
+                    user_agent_id=user_agent_id,
+                    mode=mode,
+                    preset_roles=preset_roles_tuples,
+                    selected_portrait_ids=portrait_ids,
+                    agent_configs=agent_configs,
+                ))
+                state_manager._game_task = task
+                
+                try:
+                    loop.run_until_complete(task)
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    # 清理未完成的任务
+                    pending = asyncio.all_tasks(loop)
+                    for t in pending:
+                        t.cancel()
+                    # 等待所有任务完成或取消
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            else:
+                cfg = DiplomacyConfig.default()
+                cfg.max_phases = max_phases
+                cfg.negotiation_rounds = negotiation_rounds
+                cfg.language = language
+                cfg.human_power = human_power
+                if power_names:
+                    cfg.power_names = list(power_names)
+                if power_models:
+                    cfg.models = cfg.models or {}
+                    for k, v in power_models.items():
+                        cfg.models[k] = {"model_name": v}
+                
+                # 创建任务并保存引用，以便可以取消
+                task = loop.create_task(run_diplomacy(
+                    state_manager=state_manager,
+                    config=cfg,
+                    mode=mode,
+                    selected_portrait_ids=selected_portrait_ids,
+                    agent_configs=agent_configs,
+                ))
+                state_manager._game_task = task
+                
+                try:
+                    loop.run_until_complete(task)
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    # 清理未完成的任务
+                    pending = asyncio.all_tasks(loop)
+                    for t in pending:
+                        t.cancel()
+                    # 等待所有任务完成或取消
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
     
-    thread = threading.Thread(target=run, daemon=True)  #add gpt run selected game in background
+    thread = threading.Thread(target=run, daemon=True)
     thread.start()
     state_manager.set_game_thread(thread)
     return thread

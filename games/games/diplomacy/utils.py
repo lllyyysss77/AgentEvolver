@@ -102,7 +102,7 @@ def add_legend_to_svg(svg_content: str, colors: Dict[str, str]) -> str:
             text.setAttribute('y', str((legend_height + font_size) / 2 - 2))
             text.setAttribute('font-family', 'Arial, sans-serif')
             text.setAttribute('font-size', str(font_size))
-            text.setAttribute('fill', '#333')
+            text.setAttribute('fill', '#FFFFFF')
             text.setAttribute('font-weight', 'bold')
             text.appendChild(doc.createTextNode(power))
             legend_g.appendChild(text)

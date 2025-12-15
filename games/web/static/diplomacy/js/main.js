@@ -3,6 +3,27 @@
 // Config is handled by index.html, this file only handles game display
 // =============================
 
+// 清除页面缓存：当离开游戏页面时清除游戏数据
+window.addEventListener('beforeunload', () => {
+    const keysToKeep = ['gameConfig', 'selectedPortraits', 'gameLanguage'];
+    Object.keys(sessionStorage).forEach(key => {
+        if (!keysToKeep.includes(key)) {
+            sessionStorage.removeItem(key);
+        }
+    });
+});
+
+// 强制不使用浏览器的 bfcache（后退/前进缓存）
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+        window.location.reload();
+    }
+});
+
+// 应用语言类到 body
+const gameLanguage = sessionStorage.getItem('gameLanguage') || 'en';
+document.body.classList.add(`lang-${gameLanguage}`);
+
 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
 
@@ -197,19 +218,190 @@ function getLogType(entry) {
   return "negotiation";
 }
 
+// Power name to portrait ID mapping
+const POWER_PORTRAITS = {
+  england: 1, france: 2, germany: 3, italy: 4,
+  austria: 5, russia: 6, turkey: 7
+};
+
+function getPowerFromSender(sender) {
+  if (!sender) return null;
+  const s = sender.toLowerCase();
+  for (const power of Object.keys(POWER_PORTRAITS)) {
+    if (s.includes(power)) return power;
+  }
+  return null;
+}
+
+// 从早期初始化脚本或 sessionStorage 读取选择的头像映射
+let selectedPortraits = [];
+if (window.__EARLY_INIT__ && window.__EARLY_INIT__.portraits) {
+  selectedPortraits = window.__EARLY_INIT__.portraits;
+} else {
+  try {
+    const stored = sessionStorage.getItem('selectedPortraits');
+    if (stored) selectedPortraits = JSON.parse(stored);
+  } catch (e) {}
+}
+
+// 从gameConfig读取power_names顺序
+let powerNamesOrder = null;
+try {
+  const gameConfigStr = sessionStorage.getItem('gameConfig');
+  if (gameConfigStr) {
+    const gameConfig = JSON.parse(gameConfigStr);
+    if (gameConfig.power_names && Array.isArray(gameConfig.power_names)) {
+      powerNamesOrder = gameConfig.power_names;
+    }
+  }
+} catch (e) {}
+
+// 根据power名称获取对应的头像
+function getPortraitSrcByPower(powerName) {
+  if (!powerName) return `/static/portraits/portrait_1.png`;
+  
+  // 如果有power_names顺序和selectedPortraits，使用它们
+  if (powerNamesOrder && selectedPortraits.length > 0) {
+    const powerIndex = powerNamesOrder.findIndex(p => 
+      p.toUpperCase() === powerName.toUpperCase() || 
+      p.toLowerCase().includes(powerName.toLowerCase()) ||
+      powerName.toLowerCase().includes(p.toLowerCase())
+    );
+    if (powerIndex !== -1 && powerIndex < selectedPortraits.length) {
+      const portraitId = selectedPortraits[powerIndex];
+      return `/static/portraits/portrait_${portraitId}.png`;
+    }
+  }
+  
+  // 回退到旧的硬编码映射
+  const powerLower = powerName.toLowerCase();
+  const portraitId = POWER_PORTRAITS[powerLower] || 1;
+  return `/static/portraits/portrait_${portraitId}.png`;
+}
+
+function getPortraitSrc(playerId) {
+  // 防止 NaN，确保 playerId 是有效数字
+  const validId = (typeof playerId === 'number' && !isNaN(playerId)) ? playerId : 1;
+  
+  // 如果有选择的头像，使用映射（diplomacy的playerId从1开始）
+  if (selectedPortraits.length >= validId && validId > 0) {
+    const portraitId = selectedPortraits[validId - 1];
+    return `/static/portraits/portrait_${portraitId}.png`;
+  }
+  
+  // 否则使用默认映射
+  const id = ((validId - 1) % 15) + 1;
+  return `/static/portraits/portrait_${id}.png`;
+}
+
 function renderOneLog(entry) {
-  const el = document.createElement("div");
   const t = logText(entry);
   const type = getLogType(entry);
-
-  el.classList.add("log-entry");
-  if (type === "phase") el.classList.add("phase");
-  if (type === "negotiation") el.classList.add("log-negotiation");
-  if (type === "orders") el.classList.add("log-orders");
-  if (type === "system") el.classList.add("log-system");
-
-  el.textContent = t;
+  
+  // For phase markers, keep simple style
+  if (type === "phase") {
+    const el = document.createElement("div");
+    el.classList.add("log-entry", "phase");
+    el.textContent = t;
+    return el;
+  }
+  
+  // For system logs, keep simple style but with icon
+  if (type === "system") {
+    const el = document.createElement("div");
+    el.classList.add("log-entry", "log-system");
+    el.textContent = t;
+    return el;
+  }
+  
+  // For orders and negotiation, use chat bubble style
+  const el = document.createElement("div");
+  el.classList.add("chat-message");
+  // 给不同类型的气泡打标，便于 CSS 区分背景样式
+  // 目前只有 orders / negotiation 会进入这个分支，但这里写得更通用
+  if (type) {
+    el.classList.add(`chat-${type}`);
+  }
+  
+  // Extract sender info
+  let sender = "System";
+  let power = null;
+  let content = t;
+  
+  if (entry && typeof entry === "object") {
+    sender = entry.sender || entry.name || entry.from || "System";
+    content = entry.content || entry.text || t;
+  }
+  
+  // Try to extract power from content patterns like "[ENGLAND]" or "ENGLAND orders:"
+  const powerMatch = t.match(/^\[?([A-Z_]+)\]?\s*(orders:|:)?/i);
+  if (powerMatch) {
+    const extracted = powerMatch[1].toLowerCase().replace(/_/g, '');
+    for (const p of Object.keys(POWER_PORTRAITS)) {
+      if (extracted.includes(p)) {
+        power = p;
+        sender = p.charAt(0).toUpperCase() + p.slice(1);
+        break;
+      }
+    }
+  }
+  
+  if (!power) {
+    power = getPowerFromSender(sender);
+  }
+  
+  // Avatar
+  let avatarHtml;
+  if (power) {
+    // 尝试从sender或power中提取准确的power名称
+    let powerNameForPortrait = power;
+    if (powerNamesOrder) {
+      // 首先尝试精确匹配power（小写）
+      let matchedPower = powerNamesOrder.find(p => 
+        p.toLowerCase() === power.toLowerCase()
+      );
+      
+      // 如果没找到，尝试从sender中匹配
+      if (!matchedPower && sender && typeof sender === 'string') {
+        const senderUpper = sender.toUpperCase();
+        matchedPower = powerNamesOrder.find(p => 
+          p.toUpperCase() === senderUpper || 
+          senderUpper.includes(p.toUpperCase()) ||
+          p.toUpperCase().includes(senderUpper)
+        );
+      }
+      
+      if (matchedPower) {
+        powerNameForPortrait = matchedPower;
+      }
+    }
+    const portraitSrc = getPortraitSrcByPower(powerNameForPortrait);
+    avatarHtml = `<div class="chat-avatar ${power}"><img src="${portraitSrc}" alt="${sender}"></div>`;
+  } else if (type === "orders") {
+    avatarHtml = `<div class="chat-avatar system">📜</div>`;
+  } else {
+    avatarHtml = `<div class="chat-avatar system">💬</div>`;
+  }
+  
+  const senderClass = power || (type === "orders" ? "system" : "");
+  
+  el.innerHTML = `
+    ${avatarHtml}
+    <div class="chat-bubble">
+      <div class="chat-header">
+        <span class="chat-sender ${senderClass}">${escapeHtml(sender)}</span>
+      </div>
+      <div class="chat-content">${escapeHtml(content)}</div>
+    </div>
+  `;
+  
   return el;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function wantByFilter(entry) {
@@ -319,29 +511,37 @@ function connect() {
     console.log("[WebSocket] Connection established");
     fetchHistoryList();
     
-    // Check if there's a game config from index.html
-    const gameConfig = sessionStorage.getItem('gameConfig');
-    if (gameConfig) {
-      console.log('Found game config, starting game automatically...');
-      sessionStorage.removeItem('gameConfig');
+    // 使用早期初始化的配置（首次启动）
+    if (window.__EARLY_INIT__ && window.__EARLY_INIT__.hasGameConfig && window.__EARLY_INIT__.config) {
+      console.log('Found game config from early init, starting game automatically...');
       
-      // Parse and start game
-      try {
-        const config = JSON.parse(gameConfig);
-        fetch('/api/start-game', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(config)
-        }).then(resp => {
-          if (resp.ok) {
-            console.log('Game started successfully');
-          } else {
-            console.error('Failed to start game');
-          }
-        });
-      } catch (e) {
-        console.error('Failed to parse game config:', e);
-      }
+      const config = window.__EARLY_INIT__.config;
+      
+      // 清除 sessionStorage 中的 gameConfig
+      sessionStorage.removeItem('gameConfig');
+      // 设置游戏正在运行标记（用于刷新后重连）
+      sessionStorage.setItem('gameRunning', 'true');
+      // 清除早期初始化标记，防止重复启动
+      window.__EARLY_INIT__.hasGameConfig = false;
+      
+      // 启动游戏
+      fetch('/api/start-game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      }).then(resp => {
+        if (resp.ok) {
+          console.log('Game started successfully');
+        } else {
+          console.error('Failed to start game');
+        }
+      });
+    }
+    // 刷新后重连（游戏已在运行）
+    else if (window.__EARLY_INIT__ && window.__EARLY_INIT__.isGameRunning) {
+      console.log('Game was running, reconnecting...');
+      // 不需要启动游戏，只需要等待服务器发送状态
+      window.__EARLY_INIT__.isGameRunning = false;
     }
   };
 
@@ -512,9 +712,14 @@ function updateBackExitButton(gameStatus) {
       } catch (error) {
         console.error('Error stopping game:', error);
       }
+      sessionStorage.removeItem('gameRunning');  // 清除游戏运行标记
       goHome();
     };
   } else {
+    // 游戏不在运行状态时，清除 gameRunning 标记
+    if (gameStatus === 'stopped' || gameStatus === 'finished' || gameStatus === 'waiting') {
+      sessionStorage.removeItem('gameRunning');
+    }
     backExitButton.textContent = '← Back';
     backExitButton.title = 'Back to Home';
     backExitButton.href = '/';
