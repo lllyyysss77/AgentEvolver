@@ -9,7 +9,7 @@ The platform supports **web-based gameplay and observation**, **batch model eval
 
 ## ✨ What Can You Do?
 
-### 👀 Watch or Play AI Agents in Your Browser
+### 1. Watch or Play AI Agents in Your Browser
 
 A web-based interface allows you to:
 
@@ -21,33 +21,29 @@ A web-based interface allows you to:
 - **Avalon** – Hidden roles, logical inference, and deception  
 - **Diplomacy** – Negotiation, alliances, and long-term strategy  
 
+> 📸 *Web interface screenshots and gameplay animations will be added here.*
+
 ---
 
-### 📊 Evaluate AI Models at Scale
+### 2. Evaluate AI Models at Scale
 
 AgentEvolver provides a built-in evaluation framework to **systematically compare model performance**:
 
 - Run multiple games in parallel for statistically meaningful results  
 - Control game settings and model assignments via configuration files  
-- Automatically aggregate metrics such as win rates and role-based performance  
-- Suitable for baseline comparison and ablation studies  
 
-Evaluation results are summarized clearly in logs and terminal output.
+> 📊 *Example evaluation summaries and visualized results will be added here.*
 
 ---
 
-### 🎓 Train AI Agents (Coming Soon)
+### 3. Train AI Agents
 
 AgentEvolver is designed to support **end-to-end training of AI agents in social board games**, enabling agents to learn from interaction, feedback, and long-horizon outcomes.
 
-Planned capabilities include:
-
 - Training agents directly within game environments  
-- Support for reinforcement learning–based methods (e.g., PPO, GRPO)  
-- Experience replay and multi-game training strategies  
-- Flexible integration with different model backends  
+- Support for reinforcement learning–based methods (e.g., GRPO)  
 
-Training workflows and scripts will be documented in future releases.
+> 📈 *Training curves, learning dynamics, and performance evolution plots will be added here.*
 
 ---
 
@@ -128,15 +124,6 @@ With configuration files you can:
 - Assign different models to different roles  
 - Adjust model parameters and game settings  
 - Reproduce experiments consistently  
-
----
-
-## 🧭 Common Use Cases
-
-- Compare reasoning performance of different LLMs in Avalon  
-- Test the impact of temperature or prompting strategies  
-- Analyze AI behavior in deception, alliance, and betrayal scenarios  
-- Play directly with AI agents in social board games  
 
 ---
 
