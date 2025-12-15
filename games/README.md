@@ -16,6 +16,8 @@ A web-based interface allows you to:
 - **Observer Mode** – Watch AI agents play in real time and inspect their reasoning, communication, and strategic decisions  
 - **Participate Mode** – Join a game as a human player and play alongside or against AI agents to test their interactive capabilities  
 
+**Select Game >> Select Agent >> Fill Config >> Start Arene**
+
 We currently support two games, Avalon and Diplomacy, both of which are strategy games involving long-term reasoning.
 
 <table style="border: none; border-collapse: collapse;">
