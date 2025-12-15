@@ -19,7 +19,9 @@ A web-based interface allows you to:
 
 
 We currently support two games, Avalon and Diplomacy, both of which are strategy games involving long-term reasoning.
+
 You first need to select a game, then choose your agents, configure the settings, and finally start the arena.
+
 <table style="border: none; border-collapse: collapse;">
 <tr>
 <td align="center" width="50%" style="border: none; text-align: center;">
