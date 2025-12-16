@@ -1,0 +1,23 @@
+# Training configuration for Diplomacy game
+# This config inherits from default_config.yaml using Hydra's defaults mechanism
+defaults:
+  - default_config
+  - _self_
+
+# Model-specific configuration for training
+# Only models with trainable: true will be included in the training tasks
+# For Diplomacy, you can specify which power(s) to train
+roles:
+  # Example: train ENGLAND
+  ENGLAND:
+    trainable: true
+  #   model_name: qwen-plus
+  #   temperature: 0.7
+  #   max_tokens: 2048
+
+# Game configuration (inherited from default_config, can be overridden here)
+# game:
+#   max_phases: 15
+#   language: en
+#   seed: 12345
+

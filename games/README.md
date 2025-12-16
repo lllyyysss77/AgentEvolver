@@ -115,9 +115,40 @@ After completion, a summary similar to the following will be displayed:
 
 ### Train an LLM Agent
 
-Example command:
+**Prerequisites:** Before training, install the required packages using `install.sh` from the project root.
 
-    xxxx 
+Training consists of two main steps:
+
+#### Step 1: Generate Training Tasks
+
+Generate training task Parquet files from game-specific training configurations:
+
+```bash
+# Generate training tasks for Avalon
+python games/generate_train_parquet.py \
+    --game avalon \
+    --config games/games/avalon/configs/train_config.yaml \
+    --output ./train_avalon_tasks.parquet \
+    --num_tasks 10
+```
+
+The config specifies task details and which roles/models are trainable (set `trainable: true`).
+
+
+#### Step 2: Start Training
+
+Run the training script with the generated Parquet file:
+
+```bash
+# Example for Avalon (see examples/game/avalon/run_train.sh for full example)
+python -m agentevolver.main_ppo \
+    --config-path="examples/game/avalon" \
+    --config-name='config' \
+    data.train_files="./train_avalon_tasks.parquet" \
+    data.val_files="./train_avalon_tasks.parquet" \
+    # ... other training parameters
+```
+
 
 
 ## ⚙️ Configuration

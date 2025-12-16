@@ -1,0 +1,22 @@
+# Training configuration for Avalon game
+# This config inherits from default_config.yaml using Hydra's defaults mechanism
+defaults:
+  - default_config
+  - _self_
+
+# Role-specific configuration for training
+# Only roles with trainable: true will be included in the training tasks
+roles:
+  assassin:
+    trainable: true
+    # You can override model settings here if needed
+    # model_name: qwen-plus
+    # temperature: 0.7
+    # max_tokens: 2048
+
+# Game configuration (inherited from default_config, can be overridden here)
+# game:
+#   name: avalon
+#   num_players: 5
+#   language: en
+
