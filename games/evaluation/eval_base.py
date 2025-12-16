@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Base evaluation framework for all games."""
 import copy
+import statistics
 from pathlib import Path
 from typing import Dict, Any, List, Callable, Optional
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -58,67 +60,41 @@ def build_task_configs(
 
 
 def aggregate_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Aggregate results from multiple games.
+    """Aggregate game results, automatically handling different field types."""
     
-    Calculates average values for numeric keys in the result dictionaries.
+    def compute_stats(values: List[float]) -> Dict[str, float]:
+        return {"mean": round(statistics.mean(values), 2), "max": max(values), "min": min(values)}
     
-    Args:
-        results: List of result dictionaries from individual games
+    def aggregate_fields(data_list: List[Dict], group_by: str = None) -> Dict:
+        if not data_list:
+            return {}
         
-    Returns:
-        Dictionary with aggregated statistics (averages, counts, etc.)
-    """
-    if not results:
-        return {}
+        if group_by:
+            grouped = defaultdict(lambda: defaultdict(list))
+            for item in data_list:
+                if isinstance(item, dict) and group_by in item:
+                    for k, v in item.items():
+                        if k != group_by and isinstance(v, (int, float)):
+                            grouped[item[group_by]][k].append(v)
+            return {g: {m: compute_stats(v) for m, v in sorted(metrics.items())} 
+                    for g, metrics in sorted(grouped.items())}
+        
+        all_keys = {k for d in data_list for k in d.keys()}
+        return {k: compute_stats([d[k] for d in data_list if k in d and isinstance(d[k], (int, float))])
+                for k in sorted(all_keys) if any(k in d and isinstance(d[k], (int, float)) for d in data_list)}
     
-    # Filter out None results (failed games)
     valid_results = [r for r in results if r is not None]
-    
     if not valid_results:
         return {"error": "All games failed"}
     
-    # Collect all keys from all results
-    all_keys = set()
-    for result in valid_results:
-        all_keys.update(result.keys())
+    aggregated = {}
+    game_results = [r["game_result"] for r in valid_results if "game_result" in r and isinstance(r["game_result"], dict)]
+    if game_results:
+        aggregated["game_result"] = aggregate_fields(game_results)
     
-    aggregated = {
-        "total_games": len(results),
-        "successful_games": len(valid_results),
-        "failed_games": len(results) - len(valid_results),
-    }
-    
-    # For each key, calculate average if values are numeric
-    for key in all_keys:
-        values = [r.get(key) for r in valid_results if key in r]
-        
-        # Skip None values
-        numeric_values = [v for v in values if v is not None and isinstance(v, (int, float))]
-        
-        if numeric_values:
-            aggregated[f"{key}_mean"] = sum(numeric_values) / len(numeric_values)
-            aggregated[f"{key}_sum"] = sum(numeric_values)
-            aggregated[f"{key}_min"] = min(numeric_values)
-            aggregated[f"{key}_max"] = max(numeric_values)
-        
-        # For list values, handle specially
-        if values and isinstance(values[0], list):
-            # Average each position in the list
-            max_len = max(len(v) for v in values if isinstance(v, list))
-            if max_len > 0:
-                position_sums = [0] * max_len
-                position_counts = [0] * max_len
-                for v in values:
-                    if isinstance(v, list):
-                        for i, val in enumerate(v):
-                            if isinstance(val, (int, float)):
-                                position_sums[i] += val
-                                position_counts[i] += 1
-                
-                aggregated[f"{key}_position_avg"] = [
-                    position_sums[i] / position_counts[i] if position_counts[i] > 0 else 0
-                    for i in range(max_len)
-                ]
+    roles_list = [role for r in valid_results for role in r.get("roles", []) if isinstance(role, dict)]
+    if roles_list:
+        aggregated["roles"] = aggregate_fields(roles_list, group_by="role_name")
     
     return aggregated
 

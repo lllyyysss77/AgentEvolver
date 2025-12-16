@@ -104,31 +104,63 @@ GAME_REGISTRY["avalon"] = get_avalon_evaluator()
 GAME_REGISTRY["diplomacy"] = get_diplomacy_evaluator()
 
 
-def display_results(aggregated: Dict[str, Any], game_name: str, num_games: int):
-    """Display aggregated evaluation results.
+def display_results(aggregated: Dict[str, Any], game_name: str = "Game", num_games: int = None):
+    """Display aggregated statistics in a formatted table layout."""
     
-    Args:
-        aggregated: Aggregated results dictionary
-        game_name: Name of the game
-        num_games: Number of games run
-    """
-    print("\n" + "="*70)
-    print(f"Evaluation Results Summary - {game_name.upper()}")
-    print("="*70)
+    def calc_width(values):
+        return max(len(str(v)) for v in values) + 1
     
-    # Display aggregated results
-    for key, value in sorted(aggregated.items()):
-        if isinstance(value, float):
-            print(f"  {key}: {value:.4f}")
-        elif isinstance(value, list):
-            if len(value) <= 10:
-                print(f"  {key}: {value}")
-            else:
-                print(f"  {key}: [{value[0]}, ..., {value[-1]}] (length={len(value)})")
-        else:
-            print(f"  {key}: {value}")
+    def print_table(title, headers, rows, alignments):
+        """Generic table printer with dynamic column widths."""
+        # Calculate widths: transpose rows to get columns, then calc width for each
+        columns = [[h] + [r[i] for r in rows] for i, h in enumerate(headers)]
+        widths = [calc_width(col) for col in columns]
+        
+        # Print table
+        W = 90
+        print(f"\n┌─ {title} " + "─" * (W - len(title) - 5) + "┐")
+        print(f"│{' ' * (W - 2)}│")
+        print("│  " + " │ ".join(f'{h:<{w}}' for h, w in zip(headers, widths)) + "  │")
+        print("│  " + "─┼─".join('─' * w for w in widths) + "  │")
+        for row in rows:
+            parts = [f'{v:<{w}}' if a == 'l' else f'{v:>{w}}' for v, w, a in zip(row, widths, alignments)]
+            print("│  " + " │ ".join(parts) + "  │")
+        print(f"└{'─' * (W - 2)}┘")
     
-    print("="*70)
+    def format_stats(stats):
+        """Format stats dict to string tuple (mean, max, min)."""
+        fmt = lambda v: str(v) if isinstance(v, int) else f"{v:.2f}"
+        return (f"{stats['mean']:.2f}", fmt(stats['max']), fmt(stats['min']))
+    
+    # Extract and format data
+    game_rows = [(k, *format_stats(v)) for k, v in aggregated.get("game_result", {}).items() 
+                 if isinstance(v, dict) and "mean" in v]
+    
+    role_data = [(role, metric, stats) for role, metrics in aggregated.get("roles", {}).items()
+                 for metric, stats in metrics.items() if isinstance(stats, dict) and "mean" in stats]
+    role_rows = []
+    prev = None
+    for role, metric, stats in role_data:
+        role_rows.append((role if role != prev else "", metric, *format_stats(stats)))
+        prev = role
+    
+    if not (game_rows or role_rows):
+        return print("No data to display")
+    
+    # Print header
+    W = 90
+    print("\n" + "═" * W)
+    title = f"📊 {game_name.upper()} - RESULTS" + (f" (Total Games: {num_games})" if num_games else "")
+    print(title.center(W))
+    print("═" * W)
+    
+    # Print tables
+    if game_rows:
+        print_table("🏆 Game Results", ["Metric", "Mean", "Max", "Min"], game_rows, "lrrr")
+    if role_rows:
+        print_table("👥 Role Statistics", ["Role", "Metric", "Mean", "Max", "Min"], role_rows, "llrrr")
+    
+    print("\n" + "═" * W + "\n")
 
 
 def main():

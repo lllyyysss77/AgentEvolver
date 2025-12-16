@@ -239,11 +239,26 @@ class EvalAvalonWorkflow:
         if good_victory is None:
             # Game was stopped
             return {
-                "good_victory": None,
+                "game_result": {
+                    "good_victory": None,
+                },
+                "roles": [],
             }
         
+        # Build roles list with indexed role_name and score
+        roles_list = [
+            {
+                "role_name": self.role_manager.get_indexed_role(i),
+                "score": 1 if (assigned_roles[i][2] == good_victory) else 0,
+            }
+            for i in range(len(assigned_roles))
+        ]
+        
         return {
-            "good_victory": 1 if good_victory else 0,  # Convert to int for averaging
+            "game_result": {
+                "good_victory": 1 if good_victory else 0,
+            },
+            "roles": roles_list,
         }
     
     def execute(self) -> Dict[str, Any]:
