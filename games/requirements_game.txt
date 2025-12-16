@@ -31,3 +31,8 @@ requests>=2.32.0
 # Async support
 nest-asyncio>=1.6.0
 
+# Token counter (HuggingFaceTokenCounter)
+transformers==4.53.2
+
+# Template engine
+Jinja2==3.1.6

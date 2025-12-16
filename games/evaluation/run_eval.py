@@ -31,6 +31,7 @@ import argparse
 import sys
 from pathlib import Path
 from typing import Dict, Any
+from datetime import datetime
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
@@ -55,10 +56,18 @@ def register_game(name: str):
 def get_avalon_evaluator():
     """Get Avalon game evaluator function."""
     from games.games.avalon.workflows.eval_workflow import EvalAvalonWorkflow
+
+    # Generate unified timestamp for this evaluation run (shared across all games)
+    evaluation_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     def run_single_game(config_dict: Dict[str, Any], game_id: int) -> Dict[str, Any]:
         """Run a single Avalon game."""
         try:
+            # Add game_id and evaluation_timestamp to config for log organization
+            config_dict = config_dict.copy()
+            config_dict['game_id'] = game_id
+            config_dict['evaluation_timestamp'] = evaluation_timestamp
+            
             workflow = EvalAvalonWorkflow(config_dict=config_dict)
             result = workflow.execute()
             return result
