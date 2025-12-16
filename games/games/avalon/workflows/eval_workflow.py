@@ -4,6 +4,7 @@ import asyncio
 import os
 import copy
 import uuid
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 from collections import defaultdict
@@ -15,6 +16,19 @@ from agentevolver.schema.task import Task
 from agentevolver.schema.trajectory import Trajectory
 from games.games.avalon.game import AvalonGame
 from games.games.avalon.engine import AvalonBasicConfig, AvalonGameEnvironment
+
+# Pre-import agentscope modules at module level to avoid concurrent import issues
+# This ensures all imports happen before any threads are created
+from agentscope.model import OpenAIChatModel
+from agentscope.memory import InMemoryMemory
+from agentscope.formatter import OpenAIMultiAgentFormatter
+from agentscope.token import HuggingFaceTokenCounter
+from agentscope.tool import Toolkit
+from games.agents.thinking_react_agent import ThinkingReActAgent
+from games.agents.secure_multi_agent_formatter import SecureMultiAgentFormatter
+
+# Lock for protecting HuggingFaceTokenCounter initialization from concurrent access
+_tokenizer_lock = threading.Lock()
 
 
 class RoleManager:
@@ -91,15 +105,6 @@ class EvalAvalonWorkflow:
     
     def _create_agent(self, player_id: int, indexed_role: str, base_role: str):
         """Create an agent for a player."""
-        from agentscope.model import OpenAIChatModel
-        from agentscope.memory import InMemoryMemory
-        from agentscope.formatter import OpenAIMultiAgentFormatter
-        from agentscope.token import HuggingFaceTokenCounter
-        from agentscope.tool import Toolkit
-        from games.agents.thinking_react_agent import ThinkingReActAgent
-        from games.agents.secure_multi_agent_formatter import SecureMultiAgentFormatter
-
-        
         model_config = self._get_model_config(indexed_role, base_role)
         
         # Build model kwargs
@@ -140,18 +145,18 @@ class EvalAvalonWorkflow:
         response_length = formatter_config.get('response_length')
         max_tokens = max_model_len - response_length if max_model_len and response_length else None
         
-        # Get preserved agent names from config (if available)
-        # Default to preserving "Moderator" if not specified
-        preserved_agent_names = ["Moderator"]
-        
         # Create formatter with truncation support
+        # Use lock to protect HuggingFaceTokenCounter initialization from concurrent access
+        with _tokenizer_lock:
+            token_counter = HuggingFaceTokenCounter(
+                pretrained_model_name_or_path=model_name_for_tokenizer,
+                use_mirror=True,
+            )
+        
         formatter = SecureMultiAgentFormatter(
-            token_counter=HuggingFaceTokenCounter(
-                                pretrained_model_name_or_path=model_name_for_tokenizer,
-                                use_mirror=True,
-                          ),
+            token_counter=token_counter,
             max_tokens=max_tokens,
-            preserved_agent_names=preserved_agent_names,
+            preserved_agent_names=["Moderator"],
         )
         
         return ThinkingReActAgent(
@@ -195,29 +200,37 @@ class EvalAvalonWorkflow:
             for i in range(len(assigned_roles))
         ]
 
-        # Run game
-        # Generate unique timestamp for parallel games
-        # This prevents multiple parallel games from overwriting each other's logs
-        base_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        unique_timestamp = f"{base_timestamp}_{uuid.uuid4().hex[:8]}"
-
-        # Get log_dir from game config and experiment_name from config
-        log_dir = game_config.get('log_dir', 'logs')
+        # Build log directory structure: logs/{experiment_name}/{timestamp}/game_id=0000
+        # Get evaluation_timestamp and game_id from config (set by run_eval.py)
+        # This ensures all games in the same evaluation run are organized under the same timestamp
+        base_log_dir = game_config.get('log_dir', 'logs')
+        evaluation_timestamp = self.config_dict.get('evaluation_timestamp')
+        game_id = self.config_dict.get('game_id', 0)
         experiment_name = self.config_dict.get('experiment_name')
         
-        # If experiment_name is provided, append it to log_dir
+        # Generate timestamp if not provided (backward compatibility)
+        if not evaluation_timestamp:
+            base_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            evaluation_timestamp = f"{base_timestamp}_{uuid.uuid4().hex[:8]}"
+        
+        # Sanitize experiment_name and build directory path
+        path_parts = [base_log_dir]
         if experiment_name:
-            # Sanitize experiment_name to avoid filesystem issues
-            experiment_name = str(experiment_name).replace('/', '_').replace('\\', '_')
-            log_dir = os.path.join(log_dir, experiment_name)
+            sanitized_name = str(experiment_name).replace('/', '_').replace('\\', '_')
+            path_parts.append(sanitized_name)
+        path_parts.append(evaluation_timestamp)
+        timestamp_dir = os.path.join(*path_parts)
+        
+        # Format game timestamp for create_game_log_dir: game_id=0000
+        game_timestamp = f"id={game_id:04d}"
         
         game = AvalonGame(
             agents=self.agents,
             config=config,
-            log_dir=log_dir,
+            log_dir=timestamp_dir,
             language=game_config.get('language', 'en'),
             preset_roles=assigned_roles,
-            timestamp=unique_timestamp,
+            timestamp=game_timestamp,
         )
         
         good_victory = await game.run()
