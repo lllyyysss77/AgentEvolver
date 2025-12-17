@@ -2,8 +2,7 @@
 
 **A unified arena for interaction, evaluation, and training of AI agents in social reasoning games.**
 
-AgentEvolver Game Arena extends **AgentEvolver** into multi-agent social game environments.  
-By focusing on board games with hidden information, negotiation, deception, and cooperation, it provides a controlled setting for developing **social and strategic capabilities**, beyond task execution and tool use.
+AgentEvolver Game Arena extends **AgentEvolver** into multi-agent social game environments. By focusing on board games with **multi-round, long-horizon interaction and clear reward rules**, and rich strategic spaces involving **hidden information, negotiation and deception**, it provides a controlled setting for developing **social and strategic capabilities** beyond task execution and tool use.
 
 ---
 
