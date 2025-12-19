@@ -108,25 +108,6 @@ class ThinkingReActAgent(ReActAgent):
                 *await self._reasoning_hint_msgs.get_memory(),
             ],
         )
-
-        if prompt:
-            await self.memory.clear()
-            for msg_dict in prompt:
-                content = msg_dict.get("content", "")
-                if isinstance(content, list):
-                    text_parts = []
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            text_parts.append(block.get("text", ""))
-                    prompt_text = "\n".join(text_parts)
-                elif isinstance(content, str):
-                    prompt_text = content
-                formatted_msg = Msg(
-                    name="formatted_history",
-                    role=msg_dict.get("role", "user"),
-                    content=prompt_text,
-                )
-                await self.memory.add(formatted_msg)
             
         # Call parent reasoning to get the response
         # Parent's _reasoning will:

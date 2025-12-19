@@ -112,6 +112,7 @@ class DiplomacyWorkflow(BaseAgentscopeWorkflow):
         """Create an agent for a power."""
         from agentscope.model import OpenAIChatModel
         from agentscope.memory import InMemoryMemory
+        from games.agents.memory import SlidingWindowMemory
         from agentscope.tool import Toolkit
 
         # Use training model if power is training, otherwise create default model
@@ -209,7 +210,7 @@ class DiplomacyWorkflow(BaseAgentscopeWorkflow):
             sys_prompt="",
             model=model,
             formatter=formatter,
-            memory=InMemoryMemory(),
+            memory=SlidingWindowMemory(),
             toolkit=Toolkit(),
         )
 
