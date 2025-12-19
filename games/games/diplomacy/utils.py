@@ -134,12 +134,32 @@ async def save_game_logs(
             return [convert_to_serializable(item) for item in obj]
         return obj
     
+    # Extract model names from agents if available
+    model_names = []
+    if agents is not None:
+        for agent in agents:
+            model_name = "Unknown"
+            try:
+                # Try to get model name from agent.model
+                if hasattr(agent, 'model') and agent.model is not None:
+                    if hasattr(agent.model, 'model_name'):
+                        model_name = agent.model.model_name
+                    elif hasattr(agent.model, 'name'):
+                        model_name = agent.model.name
+            except Exception:
+                pass
+            model_names.append(model_name)
+    
     game_log_data = {
         "map_name": game.map_name,
         "game_id": game.game_id,
         "outcome": game.outcome,
         "game_log": convert_to_serializable(game_log),
     }
+    
+    # Add model names if available
+    if model_names:
+        game_log_data["model_names"] = model_names
     
     game_log_path = os.path.join(game_log_dir, "game_log.json")
     with open(game_log_path, 'w', encoding='utf-8') as f:

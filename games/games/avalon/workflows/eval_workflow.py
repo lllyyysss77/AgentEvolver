@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 from collections import defaultdict
 
-from openai import OpenAI
 
 from agentevolver.utils.agentscope_utils import BaseAgentscopeWorkflow
 from games.utils import cleanup_agent_llm_clients, load_agent_class
@@ -22,7 +21,6 @@ from games.games.avalon.engine import AvalonBasicConfig, AvalonGameEnvironment
 # This ensures all imports happen before any threads are created
 from agentscope.model import OpenAIChatModel
 from agentscope.memory import InMemoryMemory
-from agentscope.formatter import OpenAIMultiAgentFormatter
 from agentscope.token import HuggingFaceTokenCounter
 from agentscope.tool import Toolkit
 from games.agents.secure_multi_agent_formatter import SecureMultiAgentFormatter
@@ -108,16 +106,29 @@ class EvalAvalonWorkflow:
         model_config = self._get_model_config(indexed_role, base_role)
         
         # Build model kwargs
+        # Get base_url from config first, then from environment variable
+        base_url = model_config.get('url') or os.environ.get('OPENAI_BASE_URL')
+        if not base_url:
+            raise ValueError(
+                "base_url is required. Please set it in config (url) or "
+                "environment variable (OPENAI_BASE_URL)."
+            )
+        
         model_kwargs = {
             'model_name': model_config['model_name'],
-            'client_args': {'base_url': model_config['url']},
+            'client_args': {'base_url': base_url},
         }
         
         # Add optional parameters
-        # Get api_key from environment variable first, then from config
-        api_key = os.environ.get('OPENAI_API_KEY') or model_config.get('api_key')
+        # Get api_key from config first, then from environment variable
+        api_key = model_config.get('api_key') or os.environ.get('OPENAI_API_KEY')
         if api_key:
             model_kwargs['api_key'] = api_key
+        else:
+            raise ValueError(
+                "api_key is required. Please set it in config (api_key) or "
+                "environment variable (OPENAI_API_KEY)."
+            )
         if 'stream' in model_config:
             model_kwargs['stream'] = model_config['stream']
         
@@ -136,7 +147,7 @@ class EvalAvalonWorkflow:
         model = OpenAIChatModel(**model_kwargs)
         
         # FIXME: model_name_for_tokenizer defaults to HuggingFace Qwen3-4B
-        model_name_for_tokenizer = "Qwen/Qwen3-4B"
+        model_name_for_tokenizer = "/mnt/data/yunpeng.zyp/models/Qwen3-4B"
         
         # Calculate max_tokens for formatter (leave room for response)
         # Follow the same logic as rollout_workflow.py
@@ -211,6 +222,12 @@ class EvalAvalonWorkflow:
         evaluation_timestamp = self.config_dict.get('evaluation_timestamp')
         game_id = self.config_dict.get('game_id', 0)
         experiment_name = self.config_dict.get('experiment_name')
+
+        for agent in self.agents:
+            if game_id == 0:
+                agent.set_console_output_enabled(True)
+            else:
+                agent.set_console_output_enabled(False)
         
         # Generate timestamp if not provided (backward compatibility)
         if not evaluation_timestamp:
@@ -223,10 +240,9 @@ class EvalAvalonWorkflow:
             sanitized_name = str(experiment_name).replace('/', '_').replace('\\', '_')
             path_parts.append(sanitized_name)
         path_parts.append(evaluation_timestamp)
-        timestamp_dir = os.path.join(*path_parts)
-        
-        # Format game timestamp for create_game_log_dir: game_id=0000
         game_timestamp = f"id={game_id:04d}"
+        path_parts.append(game_timestamp)
+        timestamp_dir = os.path.join(*path_parts)
         
         game = AvalonGame(
             agents=self.agents,
@@ -234,7 +250,6 @@ class EvalAvalonWorkflow:
             log_dir=timestamp_dir,
             language=game_config.get('language', 'en'),
             preset_roles=assigned_roles,
-            timestamp=game_timestamp,
         )
         
         good_victory = await game.run()

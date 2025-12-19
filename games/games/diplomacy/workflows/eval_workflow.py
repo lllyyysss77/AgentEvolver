@@ -80,19 +80,29 @@ class EvalDiplomacyWorkflow:
         model_config = self._get_model_config(power_name)
 
         # Build model kwargs
+        # Get base_url from config first, then from environment variable
+        base_url = model_config.get('url') or os.environ.get('OPENAI_BASE_URL')
+        if not base_url:
+            raise ValueError(
+                "base_url is required. Please set it in config (url) or "
+                "environment variable (OPENAI_BASE_URL)."
+            )
+        
         model_kwargs = {
             'model_name': model_config.get('model_name', 'qwen-plus'),
+            'client_args': {'base_url': base_url},
         }
 
-        # Add client_args if url is specified
-        if 'url' in model_config:
-            model_kwargs['client_args'] = {'base_url': model_config['url']}
-
         # Add optional parameters
-        # Get api_key from environment variable first, then from config
-        api_key = os.environ.get('OPENAI_API_KEY') or model_config.get('api_key')
+        # Get api_key from config first, then from environment variable
+        api_key = model_config.get('api_key') or os.environ.get('OPENAI_API_KEY')
         if api_key:
             model_kwargs['api_key'] = api_key
+        else:
+            raise ValueError(
+                "api_key is required. Please set it in config (api_key) or "
+                "environment variable (OPENAI_API_KEY)."
+            )
         if 'stream' in model_config:
             model_kwargs['stream'] = model_config['stream']
 

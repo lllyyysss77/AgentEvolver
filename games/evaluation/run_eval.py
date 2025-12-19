@@ -9,7 +9,7 @@ Basic Usage:
     python games/evaluation/run_eval.py \
         --game avalon \
         --config games/games/avalon/configs/task_config.yaml \
-        --num-games 10 \
+        --num-games 3 \
         --max-workers 5 \
         --experiment-name "my_experiment"
 
@@ -29,8 +29,9 @@ Using Local VLLM Models:
 """
 import argparse
 import sys
+import traceback
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Callable, Optional
 from datetime import datetime
 
 # Add project root to path
@@ -41,91 +42,62 @@ from games.utils import load_config
 from games.evaluation.eval_base import run_evaluation
 
 
-# Game registry: maps game names to their evaluation functions
-GAME_REGISTRY = {}
+# Game registry: maps game names to factory functions (lazy-loaded)
+GAME_REGISTRY: Dict[str, Callable[[], Callable]] = {}
 
 
 def register_game(name: str):
-    """Decorator to register a game's evaluation function."""
-    def decorator(func):
-        GAME_REGISTRY[name] = func
-        return func
+    """Decorator to register a game evaluator factory."""
+    def decorator(factory_func: Callable[[], Callable]):
+        GAME_REGISTRY[name] = factory_func
+        return factory_func
     return decorator
 
 
+def _create_evaluator(workflow_class, game_name: str):
+    """Create evaluator function for a game."""
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    def run_single_game(config_dict: Dict[str, Any], game_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            config_dict = config_dict.copy()
+            config_dict['game_id'] = game_id
+            config_dict['evaluation_timestamp'] = timestamp
+            workflow = workflow_class(config_dict=config_dict)
+            return workflow.execute()
+        except Exception as e:
+            print(f"[{game_name}] Game {game_id} failed: {e}", file=sys.stderr)
+            traceback.print_exc()
+            return None
+    
+    return run_single_game
+
+
+@register_game("avalon")
 def get_avalon_evaluator():
-    """Get Avalon game evaluator function."""
+    """Get Avalon evaluator (lazy-loaded)."""
     from games.games.avalon.workflows.eval_workflow import EvalAvalonWorkflow
-
-    # Generate unified timestamp for this evaluation run (shared across all games)
-    evaluation_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
-    def run_single_game(config_dict: Dict[str, Any], game_id: int) -> Dict[str, Any]:
-        """Run a single Avalon game."""
-        try:
-            # Add game_id and evaluation_timestamp to config for log organization
-            config_dict = config_dict.copy()
-            config_dict['game_id'] = game_id
-            config_dict['evaluation_timestamp'] = evaluation_timestamp
-            
-            workflow = EvalAvalonWorkflow(config_dict=config_dict)
-            result = workflow.execute()
-            return result
-        except Exception as e:
-            print(f"Game {game_id} failed: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    return run_single_game
+    return _create_evaluator(EvalAvalonWorkflow, "avalon")
 
 
+@register_game("diplomacy")
 def get_diplomacy_evaluator():
-    """Get Diplomacy game evaluator function."""
+    """Get Diplomacy evaluator (lazy-loaded)."""
     from games.games.diplomacy.workflows.eval_workflow import EvalDiplomacyWorkflow
-
-    # Generate unified timestamp for this evaluation run (shared across all games)
-    evaluation_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
-    def run_single_game(config_dict: Dict[str, Any], game_id: int) -> Dict[str, Any]:
-        """Run a single Diplomacy game."""
-        try:
-            # Add game_id and evaluation_timestamp to config for log organization
-            config_dict = config_dict.copy()
-            config_dict['game_id'] = game_id
-            config_dict['evaluation_timestamp'] = evaluation_timestamp
-            
-            workflow = EvalDiplomacyWorkflow(config_dict=config_dict)
-            result = workflow.execute()
-            return result
-        except Exception as e:
-            print(f"Game {game_id} failed: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    return run_single_game
-
-
-# Register games
-GAME_REGISTRY["avalon"] = get_avalon_evaluator()
-GAME_REGISTRY["diplomacy"] = get_diplomacy_evaluator()
+    return _create_evaluator(EvalDiplomacyWorkflow, "diplomacy")
 
 
 def display_results(aggregated: Dict[str, Any], game_name: str = "Game", num_games: int = None):
     """Display aggregated statistics in a formatted table layout."""
+    W = 90
     
     def calc_width(values):
         return max(len(str(v)) for v in values) + 1
     
     def print_table(title, headers, rows, alignments):
-        """Generic table printer with dynamic column widths."""
-        # Calculate widths: transpose rows to get columns, then calc width for each
         columns = [[h] + [r[i] for r in rows] for i, h in enumerate(headers)]
         widths = [calc_width(col) for col in columns]
         
-        # Print table
-        W = 90
         print(f"\n┌─ {title} " + "─" * (W - len(title) - 5) + "┐")
         print(f"│{' ' * (W - 2)}│")
         print("│  " + " │ ".join(f'{h:<{w}}' for h, w in zip(headers, widths)) + "  │")
@@ -136,11 +108,10 @@ def display_results(aggregated: Dict[str, Any], game_name: str = "Game", num_gam
         print(f"└{'─' * (W - 2)}┘")
     
     def format_stats(stats):
-        """Format stats dict to string tuple (mean, max, min)."""
         fmt = lambda v: str(v) if isinstance(v, int) else f"{v:.2f}"
         return (f"{stats['mean']:.2f}", fmt(stats['max']), fmt(stats['min']))
     
-    # Extract and format data
+    # Extract data
     game_rows = [(k, *format_stats(v)) for k, v in aggregated.get("game_result", {}).items() 
                  if isinstance(v, dict) and "mean" in v]
     
@@ -153,10 +124,10 @@ def display_results(aggregated: Dict[str, Any], game_name: str = "Game", num_gam
         prev = role
     
     if not (game_rows or role_rows):
-        return print("No data to display")
+        print("No data to display")
+        return
     
     # Print header
-    W = 90
     print("\n" + "═" * W)
     title = f"📊 {game_name.upper()} - RESULTS" + (f" (Total Games: {num_games})" if num_games else "")
     print(title.center(W))
@@ -211,7 +182,7 @@ Examples:
         "--max-workers",
         "-w",
         type=int,
-        default=1,
+        default=10,
         help="Maximum number of parallel workers (default: 1)",
     )
     parser.add_argument(
@@ -252,19 +223,22 @@ Examples:
         print(f"Error: Config file not found: {config_path}", file=sys.stderr)
         sys.exit(1)
     
-    # Load config file (supports Hydra inheritance)
+    # Load config file
     try:
         config_dict = load_config(config_path)
+        if not isinstance(config_dict, dict):
+            print(f"Error: Config must be a dictionary, got {type(config_dict)}", file=sys.stderr)
+            sys.exit(1)
     except Exception as e:
-        print(f"Error loading config file: {e}", file=sys.stderr)
+        print(f"Error loading config: {e}", file=sys.stderr)
         sys.exit(1)
     
-    if not isinstance(config_dict, dict):
-        print(f"Error: Config file must contain a dictionary, got {type(config_dict)}", file=sys.stderr)
+    # Get game evaluator (lazy-loaded: only imports the selected game)
+    if args.game not in GAME_REGISTRY:
+        print(f"Error: Game '{args.game}' not found. Available: {', '.join(GAME_REGISTRY.keys())}", file=sys.stderr)
         sys.exit(1)
     
-    # Get game evaluator
-    run_single_game_fn = GAME_REGISTRY[args.game]
+    run_single_game_fn = GAME_REGISTRY[args.game]()
     
     # Prepare kwargs for additional config overrides
     kwargs = {}
@@ -284,17 +258,12 @@ Examples:
             run_single_game_fn=run_single_game_fn,
             **kwargs
         )
-        
-        # Display results
         display_results(aggregated, args.game, args.num_games)
         
-        # Exit with error code if all games failed
         if aggregated.get("error") == "All games failed":
             sys.exit(1)
-        
     except Exception as e:
         print(f"Error during evaluation: {e}", file=sys.stderr)
-        import traceback
         traceback.print_exc()
         sys.exit(1)
 

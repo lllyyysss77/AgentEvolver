@@ -180,15 +180,37 @@ class GameLogger:
         if not self.game_log_dir:
             return
         
-        self._save_game_log_json(env, roles)
+        self._save_game_log_json(env, roles, agents)
         await self._save_agent_memories(agents, roles)
     
-    def _save_game_log_json(self, env: Any, roles: list[tuple]) -> None:
-        """Save game log to JSON file."""
+    def _save_game_log_json(self, env: Any, roles: list[tuple], agents: list[AgentBase] = None) -> None:
+        """Save game log to JSON file.
+        
+        Args:
+            env: Game environment
+            roles: List of roles as tuples (role_id, role_name, is_good)
+            agents: Optional list of agents to extract model names from
+        """
         self.game_log["game_end"] = {
             "good_victory": env.good_victory,
             "quest_results": env.quest_results,
         }
+        
+        # Extract model names from agents if available
+        model_names = []
+        if agents is not None:
+            for i, agent in enumerate(agents):
+                model_name = "Unknown"
+                try:
+                    # Try to get model name from agent.model
+                    if hasattr(agent, 'model') and agent.model is not None:
+                        if hasattr(agent.model, 'model_name'):
+                            model_name = agent.model.model_name
+                        elif hasattr(agent.model, 'name'):
+                            model_name = agent.model.name
+                except Exception:
+                    pass
+                model_names.append(model_name)
         
         game_log_data = {
             "roles": [(int(r), n, bool(s)) for r, n, s in roles],
@@ -198,6 +220,10 @@ class GameLogger:
             },
             "game_log": self._convert_to_serializable(self.game_log),
         }
+        
+        # Add model names if available
+        if model_names:
+            game_log_data["model_names"] = model_names
         
         path = os.path.join(self.game_log_dir, "game_log.json")
         with open(path, 'w', encoding='utf-8') as f:

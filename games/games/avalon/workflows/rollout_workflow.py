@@ -141,16 +141,28 @@ class AvalonRolloutWorkflow(BaseAgentscopeWorkflow):
             model_config = self._get_model_config(indexed_role, base_role)
             
             # Build model kwargs (aligned with eval_workflow.py)
+            # Get base_url from config first, then from environment variable
+            base_url = model_config.get('url') or os.environ.get('OPENAI_BASE_URL')
+            if not base_url:
+                raise ValueError(
+                    "base_url is required. Please set it in config (url) or "
+                    "environment variable (OPENAI_BASE_URL)."
+                )
+            
             model_kwargs = {
                 'model_name': model_config['model_name'],
-                'client_args': {'base_url': model_config['url']},
+                'client_args': {'base_url': base_url},
             }
             
-            # Add optional parameters
-            # Get api_key from environment variable first, then from config
-            api_key = os.environ.get('OPENAI_API_KEY') or model_config.get('api_key')
+            # Get api_key from config first, then from environment variable
+            api_key = model_config.get('api_key') or os.environ.get('OPENAI_API_KEY')
             if api_key:
                 model_kwargs['api_key'] = api_key
+            else:
+                raise ValueError(
+                    "api_key is required. Please set it in config (api_key) or "
+                    "environment variable (OPENAI_API_KEY)."
+                )
             if 'stream' in model_config:
                 model_kwargs['stream'] = model_config['stream']
             
@@ -262,21 +274,26 @@ class AvalonRolloutWorkflow(BaseAgentscopeWorkflow):
             else:    
                 self.agents[i].set_console_output_enabled(False)
 
-        # Run game
-        # Generate unique timestamp for parallel rollouts by including data_id and rollout_id
-        # This prevents multiple parallel rollouts from overwriting each other's logs
-        base_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        unique_timestamp = f"{base_timestamp}_d{self.data_id}_r{self.rollout_id}"
-        
-        # Get log_dir from game config and experiment_name from self.config
-        log_dir = game_config.get('log_dir', 'logs')
+                # Run game
+        # Build log directory structure:
+        # logs/{experiment_name}/{epoch}/data_id={data_id}rollout_id={rollout_id}/
+        base_log_dir = game_config.get('log_dir', 'logs')
         experiment_name = getattr(self.config.trainer, 'experiment_name', None) if hasattr(self.config, 'trainer') else None
-        
-        # If experiment_name is provided, append it to log_dir
+        epoch = None
+        try:
+            epoch = self.task.metadata.get("epoch") if isinstance(self.task.metadata, dict) else None
+        except Exception:
+            epoch = None
+        epoch = str(epoch) if epoch is not None else "unknown_epoch"
+
+        path_parts = [base_log_dir]
         if experiment_name:
-            # Sanitize experiment_name to avoid filesystem issues
-            experiment_name = str(experiment_name).replace('/', '_').replace('\\', '_')
-            log_dir = os.path.join(log_dir, experiment_name)
+            sanitized_name = str(experiment_name).replace('/', '_').replace('\\', '_')
+            path_parts.append(sanitized_name)
+        path_parts.append(epoch)
+        rollout_dir = f"data_id={self.data_id}rollout_id={self.rollout_id}"
+        path_parts.append(rollout_dir)
+        log_dir = os.path.join(*path_parts)
         
         game = AvalonGame(
             agents=self.agents,
@@ -284,7 +301,6 @@ class AvalonRolloutWorkflow(BaseAgentscopeWorkflow):
             log_dir=log_dir,
             language=game_config.get('language', 'en'),
             preset_roles=assigned_roles,
-            timestamp=unique_timestamp,
         )
         
         good_victory = await game.run() or False
