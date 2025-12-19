@@ -294,7 +294,7 @@ async def get_options(game: str | None = None):
             web_cfg = load_config(web_config_path)
             
             if isinstance(web_cfg, dict):
-                result["portraits"] = web_cfg.get("portraits", {})
+                result["portraits"] = web_cfg['portraits']
                 default_model = web_cfg.get("default_model", {})
                 
                 default_model = dict(default_model)
@@ -312,9 +312,9 @@ async def get_options(game: str | None = None):
     # 有 game 参数：返回 task_config.yaml
     if game == "diplomacy":
         # 读取 Diplomacy 配置
-        yaml_path = os.environ.get("DIPLOMACY_CONFIG_YAML", "games/diplomacy/task_config.yaml")
+        yaml_path = os.environ.get("DIPLOMACY_CONFIG_YAML", "games/games/diplomacy/configs/default_config.yaml")
         diplomacy_cfg = load_config(yaml_path)['game']
-        lang = _to_ui_lang(diplomacy_cfg.language)
+        lang = _to_ui_lang(diplomacy_cfg['language'])
 
         return {
             "powers": diplomacy_cfg['power_names'],
@@ -330,7 +330,7 @@ async def get_options(game: str | None = None):
 
     if game == "avalon":
         # 返回 Avalon 默认配置
-        yaml_path = os.environ.get("AVALON_CONFIG_YAML", "games/avalon/task_config.yaml")
+        yaml_path = os.environ.get("AVALON_CONFIG_YAML", "games/games/avalon/configs/default_config.yaml")
         avalon_cfg = load_config(yaml_path)['game']
         lang = _to_ui_lang(avalon_cfg.language)
 

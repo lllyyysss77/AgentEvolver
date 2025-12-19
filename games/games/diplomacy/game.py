@@ -7,11 +7,12 @@ import asyncio
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-
+from loguru import logger
 from diplomacy import Game
 from diplomacy.engine.renderer import Renderer
 from agentscope.message import Msg
 from agentscope.agent import AgentBase
+from agentscope.memory import InMemoryMemory
 
 # 引入重构后的工具函数
 from .utils import Colors, add_legend_to_svg, save_game_logs, order_to_natural_language, load_prompts, parse_negotiation_messages
@@ -78,6 +79,8 @@ class DiplomacyGame:
         # 如果config中没有指定，则使用game.powers.keys()的默认顺序
         power_names = self.config.power_names if self.config.power_names else list(self.game.powers.keys())
         for i, power_name in enumerate(power_names):
+            logger.info(f"Assigning role to agent {i} ({get(self.agents[i].model.model_name,"Human")}): {power_name}")
+
             if i < len(self.agents):
                 self.agents[i].power_name = power_name 
                 self.power_agent_map[power_name] = self.agents[i]
@@ -281,17 +284,7 @@ class DiplomacyGame:
                 )
                 
                 msg = Msg(name="Moderator", content=negotiation_prompt, role="assistant")
-                try:
-                    response_msg = await asyncio.wait_for(
-                        agent(msg),
-                        timeout=300.0
-                    )
-                except Exception as e:
-                    self._debug_print(f"{Colors.FAIL}{power_name} 谈判阶段发生错误: {type(e).__name__}: {e}{Colors.ENDC}")
-                    import traceback
-                    traceback.print_exc()
-                    return []  # 返回空列表而不是抛出异常
-                
+                response_msg = await agent(msg)
                 response_text = response_msg.get_text_content()
 
                 parsed_msgs = parse_negotiation_messages(raw=response_text, power_name=power_name, power_names=list(self.game.powers.keys()))
@@ -324,28 +317,11 @@ class DiplomacyGame:
                     continue
                 tasks.append(process_agent_negotiation(power_name, self.power_agent_map[power_name]))
             
-            try:
-                results = await asyncio.wait_for(
-                    asyncio.gather(*tasks, return_exceptions=True),
-                    timeout=360.0  # 整体超时（7个agent * 约50秒 + 缓冲）
-                )
-            except asyncio.TimeoutError:
-                self._debug_print(f"{Colors.FAIL}整体超时（360秒）！某些agent未响应{Colors.ENDC}")
-                # 处理超时情况 - 尝试获取已完成的结果
-                results = []
-                for task in tasks:
-                    try:
-                        # 检查任务是否已完成
-                        if hasattr(task, 'done') and task.done():
-                            result = await task
-                            results.append(result)
-                        else:
-                            results.append([])
-                    except Exception as e:
-                        self._debug_print(f"{Colors.FAIL}获取任务结果时出错: {e}{Colors.ENDC}")
-                        results.append([])
+            results = await asyncio.gather(*tasks, return_exceptions=True)
             
             for res in results:
+                if isinstance(res, Exception):
+                    continue
                 for sender, recipient, content in res:
                     round_messages.append((sender, recipient, content))
                     round_negotiation_log["messages"].append({"sender": sender, "recipient": recipient, "content": content})
@@ -419,18 +395,8 @@ class DiplomacyGame:
             )
 
             msg = Msg(name="Moderator", content=order_prompt, role="user")
-            try:
-                response_msg = await asyncio.wait_for(
-                    agent(msg),
-                    timeout=300.0
-                )
-            except Exception as e:
-                self._debug_print(f"{Colors.FAIL}{power_name} 指令阶段发生错误: {type(e).__name__}: {e}{Colors.ENDC}")
-                import traceback
-                traceback.print_exc()
-                return power_name, submitted_orders, []
-            response_text = str(response_msg.content)
-            phase_log["order_logs"][power_name] = response_text
+            response_msg = await agent(msg)
+            response_text = response_msg.get_text_content()
 
             # Parse orders
             json_orders = []
@@ -464,35 +430,10 @@ class DiplomacyGame:
             else:
                 random_fallback_powers.append(power_name)
         
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=360.0  # 整体超时（7个agent * 约50秒 + 缓冲）
-            )
-        except asyncio.TimeoutError:
-            self._debug_print(f"{Colors.FAIL}指令阶段整体超时（360秒）！某些agent未响应{Colors.ENDC}")
-            # 处理超时情况 - 尝试获取已完成的结果
-            results = []
-            for task in tasks:
-                try:
-                    # 检查任务是否已完成
-                    if hasattr(task, 'done') and task.done():
-                        result = await task
-                        results.append(result)
-                    else:
-                        # 任务未完成，返回默认值（power_name, [], []）
-                        # 注意：这里无法获取power_name，所以需要修改逻辑
-                        results.append(None)  # 或者跳过
-                except Exception as e:
-                    self._debug_print(f"{Colors.FAIL}获取任务结果时出错: {e}{Colors.ENDC}")
-                    results.append(None)
-        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
         for result in results:
-            if result is None:
-                continue  # 跳过超时的任务
             if isinstance(result, Exception):
-                self._debug_print(f"{Colors.FAIL}Agent处理异常: {result}{Colors.ENDC}")
                 continue
             if not isinstance(result, tuple) or len(result) != 3:
                 continue  # 跳过格式不正确的结果

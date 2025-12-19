@@ -213,7 +213,8 @@ class AvalonGame:
         EVIL_SIDE = 0
         
         for i, (role_id, role_name, side) in enumerate(self.roles):
-            logger.info(f"Assigning role to agent {i}: {role_name}, {side}")
+            logger.info(f"Assigning role to agent {i}({get(self.agents[i].model.model_name,"Human")}): {role_name}, {side}")
+
             agent = self.agents[i]
             localized_role_name = self.localizer.format_role_name(role_name)
             side_name = self.localizer.format_side_name(side)

@@ -205,7 +205,6 @@ async def run_diplomacy(
             agent_class_path = None
             if frontend_cfg and frontend_cfg.get("base_model"):
                 # 1. 优先使用前端传递的 agent 配置
-                print("debug: frontend_cfg: ", frontend_cfg)
                 model_name = frontend_cfg.get("base_model", os.getenv("MODEL_NAME", "qwen-plus"))
                 api_base = frontend_cfg.get("api_base") or os.getenv("OPENAI_API_BASE", "")
                 api_key = frontend_cfg.get("api_key") or os.getenv("OPENAI_API_KEY", "")
@@ -246,7 +245,6 @@ async def run_diplomacy(
             )
             agent.power_name = power
             agent.set_console_output_enabled(True)
-            os.environ["DEBUG"] = "true"
         agents.append(agent)
 
     state_manager.set_mode(mode, config.human_power if mode == "participate" else None, game="diplomacy")

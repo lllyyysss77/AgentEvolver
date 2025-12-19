@@ -161,6 +161,7 @@ async def save_game_logs(
     if model_names:
         game_log_data["model_names"] = model_names
     
+    os.makedirs(game_log_dir, exist_ok=True)
     game_log_path = os.path.join(game_log_dir, "game_log.json")
     with open(game_log_path, 'w', encoding='utf-8') as f:
         json.dump(game_log_data, f, ensure_ascii=False, indent=2)

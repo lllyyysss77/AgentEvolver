@@ -394,7 +394,7 @@ function requiredCountForPreview() {
   return 0;
 }
 
-// Avalon(5人) 前端复刻 roles assign：与后端 engine.py 的思想一致（不保证与后端完全一致，因后端仍随机）
+// Avalon(5人) 前端复刻 roles assign
 function avalonAssignRolesFor5() {
   // 固定 5 人：2 evil(Assassin+Minion) + 3 good(Merlin+Percival+Servant)
   // role 名称直接用于 UI 展示

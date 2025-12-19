@@ -146,7 +146,7 @@
         <div class="subtitle">Bind base model and API info for each Agent (saved to local browser localStorage)</div>
       </div>
       <div class="subtitle">
-        <a href="./index.html" style="color: var(--accent2); text-decoration: none;">Back to Agent Arena</a>
+        <a href="./index.html" id="back-link" style="color: var(--accent2); text-decoration: none;">Back to Agent Arena</a>
       </div>
     </header>
 
@@ -348,6 +348,11 @@
       await loadDefaultPrefill();
       render();
     })();
+
+    // 当从 character_config 返回 index 时，设置标记以避免强制刷新配置
+    document.getElementById('back-link').addEventListener('click', function() {
+      sessionStorage.setItem('fromCharacterConfig', 'true');
+    });
   </script>
 </body>
 </html>
