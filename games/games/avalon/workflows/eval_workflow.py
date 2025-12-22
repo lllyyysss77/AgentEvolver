@@ -11,22 +11,17 @@ from collections import defaultdict
 
 
 from agentevolver.utils.agentscope_utils import BaseAgentscopeWorkflow
-from games.utils import cleanup_agent_llm_clients, load_agent_class
+from games.utils import (
+    cleanup_agent_llm_clients,
+    create_agent_from_config,
+    create_model_from_config,
+    deep_merge,
+)
 from agentevolver.schema.task import Task
 from agentevolver.schema.trajectory import Trajectory
 from games.games.avalon.game import AvalonGame
 from games.games.avalon.engine import AvalonBasicConfig, AvalonGameEnvironment
 
-# Pre-import agentscope modules at module level to avoid concurrent import issues
-# This ensures all imports happen before any threads are created
-from agentscope.model import OpenAIChatModel
-from agentscope.memory import InMemoryMemory
-from agentscope.token import HuggingFaceTokenCounter
-from agentscope.tool import Toolkit
-from games.agents.secure_multi_agent_formatter import SecureMultiAgentFormatter
-
-# Lock for protecting HuggingFaceTokenCounter initialization from concurrent access
-_tokenizer_lock = threading.Lock()
 
 
 class RoleManager:
@@ -66,122 +61,68 @@ class EvalAvalonWorkflow:
         self.config_dict = config_dict
         self.role_manager: Optional[RoleManager] = None
     
-    def _get_model_config(self, indexed_role: str, base_role: str) -> Dict[str, Any]:
+    def _get_role_config(self, indexed_role: str, base_role: str) -> Dict[str, Any]:
         """
-        Get model configuration for a role.
-        Role-specific config overrides default_model config.
+        Get complete role configuration (including model, agent, trainable, act_by_user, etc.).
+        Role-specific config overrides default_role config.
         """
         if self.config_dict is None:
             raise ValueError("config_dict is None. Please check your configuration file.")
         
-        default_model = self.config_dict.get('default_model', {})
+        default_role = self.config_dict.get('default_role', {})
         roles_config = self.config_dict.get('roles', {})
         
-        if not isinstance(default_model, dict):
-            default_model = {}
+        if not isinstance(default_role, dict):
+            default_role = {}
         if not isinstance(roles_config, dict):
             roles_config = {}
         
-        # Start with default_model config
-        config = copy.deepcopy({**default_model})
+        # Start with default_role config
+        role_config = copy.deepcopy(default_role)
         
         # Find role-specific config (try indexed_role first, then base_role)
-        role_config = next(
+        specific_role_config = next(
             (v for k, v in roles_config.items() 
              if k.lower() in [indexed_role.lower(), base_role.lower()]),
             None
         )
         
-        # Override with role-specific config
-        if role_config:
-            config.update(role_config)
-            # Handle model_name -> name mapping
-            if 'model_name' in role_config:
-                config['model_name'] = role_config['model_name']
+        # Override with role-specific config if present
+        if specific_role_config and isinstance(specific_role_config, dict):
+            # Deep merge: recursively merge nested dicts
+            role_config = deep_merge(role_config, specific_role_config)
         
-        return config
+        return role_config
+    
+    def _get_model_config(self, indexed_role: str, base_role: str) -> Dict[str, Any]:
+        """Get model configuration for a role."""
+        role_config = self._get_role_config(indexed_role, base_role)
+        return role_config.get('model', {})
+    
+    def _get_agent_config(self, indexed_role: str, base_role: str) -> Dict[str, Any]:
+        """Get agent configuration for a role."""
+        role_config = self._get_role_config(indexed_role, base_role)
+        return role_config.get('agent', {})
     
     def _create_agent(self, player_id: int, indexed_role: str, base_role: str):
-        """Create an agent for a player."""
+        """Create an agent for a player using create_agent_from_config."""
         model_config = self._get_model_config(indexed_role, base_role)
+        agent_config = self._get_agent_config(indexed_role, base_role)
         
-        # Build model kwargs
-        # Get base_url from config first, then from environment variable
-        base_url = model_config.get('url') or os.environ.get('OPENAI_BASE_URL')
-        if not base_url:
+        # Create model using factory function
+        model = create_model_from_config(model_config)
+        
+        # Validate agent_config
+        if not agent_config:
             raise ValueError(
-                "base_url is required. Please set it in config (url) or "
-                "environment variable (OPENAI_BASE_URL)."
+                f"agent config is required. Please specify it in default_role.agent or role-specific config for {indexed_role}."
             )
         
-        model_kwargs = {
-            'model_name': model_config['model_name'],
-            'client_args': {'base_url': base_url},
-        }
-        
-        # Add optional parameters
-        # Get api_key from config first, then from environment variable
-        api_key = model_config.get('api_key') or os.environ.get('OPENAI_API_KEY')
-        if api_key:
-            model_kwargs['api_key'] = api_key
-        else:
-            raise ValueError(
-                "api_key is required. Please set it in config (api_key) or "
-                "environment variable (OPENAI_API_KEY)."
-            )
-        if 'stream' in model_config:
-            model_kwargs['stream'] = model_config['stream']
-        
-        # Build generate_kwargs
-        generate_kwargs = {
-            k: model_config[k] for k in ['temperature', 'max_tokens']
-            if k in model_config
-        }
-        # turn off auto-thinking for qwen3
-        generate_kwargs['extra_body'] = {
-                'enable_thinking': False,  # Required for non-streaming calls with DashScope
-            }
-        if generate_kwargs:
-            model_kwargs['generate_kwargs'] = generate_kwargs
-        
-        model = OpenAIChatModel(**model_kwargs)
-        
-        # FIXME: model_name_for_tokenizer defaults to HuggingFace Qwen3-4B
-        model_name_for_tokenizer = "/mnt/data/yunpeng.zyp/models/Qwen3-4B"
-        
-        # Calculate max_tokens for formatter (leave room for response)
-        # Follow the same logic as rollout_workflow.py
-        formatter_config = self.config_dict.get('formatter', {}) if self.config_dict else {}
-        max_model_len = formatter_config.get('max_model_len')
-        response_length = formatter_config.get('response_length')
-        max_tokens = max_model_len - response_length if max_model_len and response_length else None
-        
-        # Create formatter with truncation support
-        # Use lock to protect HuggingFaceTokenCounter initialization from concurrent access
-        with _tokenizer_lock:
-            token_counter = HuggingFaceTokenCounter(
-                pretrained_model_name_or_path=model_name_for_tokenizer,
-                use_mirror=True,
-            )
-        
-        formatter = SecureMultiAgentFormatter(
-            token_counter=token_counter,
-            max_tokens=max_tokens,
-            preserved_agent_names=["Moderator"],
-        )
-        
-        # Load agent class from role config, default to ThinkingReActAgent
-        agent_class_path = model_config.get('agent_class')
-        AgentClass = load_agent_class(agent_class_path)
-        
-        return AgentClass(
-            name=f"Player{player_id}",
-            sys_prompt="",
+        return create_agent_from_config(
+            agent_config=agent_config,
             model=model,
-            formatter=formatter,
-            memory=InMemoryMemory(),
-            toolkit=Toolkit(),
-            # thinking_sys_prompt=""
+            name=f"Player{player_id}",
+            actor_rollout_ref=None,  # eval workflow doesn't have actor_rollout_ref
         )
     
     async def _execute_async(self) -> Dict[str, Any]:

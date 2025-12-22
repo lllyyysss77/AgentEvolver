@@ -277,9 +277,9 @@ python -m agentevolver.main_ppo \
 Games and evaluations are controlled via **YAML configuration files**. Configuration structure:
 
 - **Game settings** (`game`) – Game-specific parameters (e.g., `num_players`, `language`)
-- **Model configuration** – Priority order:
+- **Role configuration** – Priority order:
   1. **Role-specific settings** (`roles` section) – Each role uses its own configuration if specified
-  2. **Default model settings** (`default_model`) – Used as fallback when a role's configuration is missing
+  2. **Default role settings** (`default_role`) – Used as fallback when a role's configuration is missing
 
 Example:
 
@@ -288,13 +288,25 @@ Example:
       num_players: 5
       language: en
     
-    default_model:
-      model_name: qwen-plus
-      temperature: 0.7
+    default_role:
+      trainable: false
+      act_by_user: false
+      model:
+        model_name: qwen-plus
+        temperature: 0.7
+        max_tokens: 2048
+      agent:
+        type: ThinkingReActAgent
+        kwargs:
+          sys_prompt: ""
+          memory:
+            type: InMemoryMemory
+            kwargs: {}
     
     roles:
       assassin:
-        model_name: custom-model  # assassin uses custom-model, others use qwen-plus  
+        model:
+          model_name: custom-model  # assassin uses custom-model, others use qwen-plus  
 
 
 
@@ -303,9 +315,11 @@ Example:
 
 The AgentEvolver Game Arena is designed to be extensible and customizable. You can:
 
-- **Develop custom agents** - Implement your own agent logic, strategies, and reasoning capabilities
-- **Design memory systems** - Build memory architectures that help agents remember game history, player behaviors, and strategic patterns
-- **Train models** - Use the provided training pipeline to fine-tune models for specific roles, strategies, or game scenarios
+- **Develop custom agents** - Implement your own agent logic, strategies, and reasoning capabilities. Reference `games/agents/thinking_react_agent.py` and configure via `agent_config.type` in YAML.
+- **Design memory systems** - Build memory architectures that help agents remember game history, player behaviors, and strategic patterns. Create formatters for message formatting and token management. Configure via `agent_config.kwargs.memory` and `agent_config.kwargs.formatter` in YAML.
+- **Train models** - Use the provided training pipeline to fine-tune models for specific roles, strategies, or game scenarios.
+
+See `games/games/avalon/configs/default_config.yaml` and `games/games/diplomacy/configs/default_config.yaml` for detailed configuration examples.
 
 Now, try anything you want. Build your own agents, memories, or models. And one day, let's see them meet — and compete — in the arena.
 
