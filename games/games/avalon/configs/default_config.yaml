@@ -24,6 +24,12 @@ game:
   num_players: 5
   language: en  # en: English, cn: Chinese
   log_dir: games/logs
+  roles_name:
+    - Merlin
+    - Servant
+    - Servant
+    - Minion
+    - Assassin
 
 # Role-specific configuration (empty by default, can be overridden in child configs)
 # 

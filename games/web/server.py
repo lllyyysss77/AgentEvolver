@@ -18,12 +18,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from games.web.game_state_manager import GameStateManager
 from games.web.run_web_game import start_game_thread
 from games.utils import load_config
-# 全局游戏状态管理器
 state_manager = GameStateManager()
 
 app = FastAPI(title="Games Web Interface")
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -61,35 +59,35 @@ async def favicon():
     if favicon_png.exists():
         return FileResponse(
             str(favicon_png),
-            media_type="image/png"  # 明确指定 MIME 类型
+            media_type="image/png"
         )
 
 @app.get("/avalon/observe")
 async def avalon_observe_page():
-    """Avalon 观战页面"""
+    """Avalon observe page"""
     return _page("avalon/observe.html")
 
 
 @app.get("/avalon/participate")
 async def avalon_participate_page():
-    """Avalon 参与页面"""
+    """Avalon participate page"""
     return _page("avalon/participate.html")
 
 
 @app.get("/diplomacy/observe")
 async def dip_observe_page():
-    """Diplomacy 观战页面"""
+    """Diplomacy observe page"""
     return _page("diplomacy/observe.html")
 
 
 @app.get("/diplomacy/participate")
 async def dip_participate_page():
-    """Diplomacy 参与页面"""
+    """Diplomacy participate page"""
     return _page("diplomacy/participate.html")
 
 
 async def _handle_websocket_connection(websocket: WebSocket, path: str = ""):
-    """WebSocket 连接处理：接收用户输入，推送游戏状态和消息"""
+    """WebSocket connection handler: receive user input, push game state and messages"""
     connection_id = str(uuid.uuid4())
     state_manager.add_websocket_connection(connection_id, websocket)
     
@@ -97,7 +95,6 @@ async def _handle_websocket_connection(websocket: WebSocket, path: str = ""):
         if state_manager.game_state.get("status") == "stopped":
             state_manager.reset()
         
-        # 发送当前游戏状态和模式信息
         await websocket.send_json(state_manager.format_game_state())
         await websocket.send_json({
             "type": "mode_info",
@@ -139,7 +136,7 @@ async def _handle_websocket_connection(websocket: WebSocket, path: str = ""):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket 端点：实时通信"""
+    """WebSocket endpoint for real-time communication"""
     try:
         await websocket.accept()
     except Exception as e:
@@ -151,27 +148,27 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 class StartGameRequest(BaseModel):
-    """启动游戏请求参数"""
+    """Start game request parameters"""
     game: str = "avalon"
     mode: str = "observe"
     language: str = "en"
-    agent_configs: Dict[int, Dict[str, str]] | None = None  # 前端传递的 agent 配置 {portrait_id: {base_model, api_base, api_key}}
-    # Avalon 参数
+    agent_configs: Dict[int, Dict[str, str]] | None = None  # Frontend agent config {portrait_id: {base_model, api_base, api_key}}
+    # Avalon parameters
     num_players: int = 5
     user_agent_id: int = 0
-    preset_roles: list[dict] | None = None  # 前端预览后下发的固定角色分配
-    selected_portrait_ids: list[int] | None = None  # 前端选择的 portrait ids [1-15]
-    # Diplomacy 参数
+    preset_roles: list[dict] | None = None  # Fixed role assignment from frontend preview
+    selected_portrait_ids: list[int] | None = None  # Frontend selected portrait ids [1-15]
+    # Diplomacy parameters
     human_power: Optional[str] = None
     max_phases: int = 20
     negotiation_rounds: int = 3
-    power_names: list[str] | None = None  # 前端打乱后下发的 power 顺序
+    power_names: list[str] | None = None  # Shuffled power order from frontend
     power_models: Dict[str, str] | None = None
 
 
 @app.post("/api/start-game")
 async def start_game(request: StartGameRequest):
-    """启动游戏：在后台线程中运行 Avalon 或 Diplomacy"""
+    """Start game: run Avalon or Diplomacy in background thread"""
     game = request.game
     mode = request.mode
     
@@ -208,13 +205,12 @@ async def start_game(request: StartGameRequest):
 
 @app.post("/api/stop-game")
 async def stop_game():
-    """停止当前游戏"""
+    """Stop current game"""
     if state_manager.game_state.get("status") != "running":
         raise HTTPException(status_code=400, detail="No game is currently running")
     
     state_manager.stop_game()
     
-    # 尝试取消asyncio任务
     if hasattr(state_manager, '_game_task') and state_manager._game_task:
         try:
             state_manager._game_task.cancel()
@@ -230,7 +226,6 @@ async def stop_game():
     )
     await state_manager.broadcast_message(stop_msg)
     
-    # 等待一小段时间让游戏线程有机会响应停止信号
     import asyncio
     await asyncio.sleep(0.1)
     
@@ -264,7 +259,6 @@ async def get_history_item(index: int):
     s = dict(state_manager.history[index])
     s.setdefault("kind", "state")
     s.setdefault("meta", {})
-    # Normalize phase/round to avoid null in frontend display
     s["phase"] = s.get("phase") or s["meta"].get("phase") or "Init"
     s["round"] = s.get("round") if s.get("round") is not None else 0
     s["index"] = index
@@ -273,20 +267,14 @@ async def get_history_item(index: int):
 
 @app.get("/api/options")
 async def get_options(game: str | None = None):
-    """获取游戏配置选项：用于前端预填充
-    - 无 game 参数：返回 web_config.yaml 配置（角色名字等）
-    - game=avalon：返回 Avalon 默认配置
-    - game=diplomacy：返回 Diplomacy 配置（powers, models 等）
-    """
+    """Get game configuration options for frontend pre-fill"""
     import os
     import yaml
 
     def _to_ui_lang(raw: str | None) -> str:
-        """语言代码标准化"""
         lang = (raw or "").lower().strip()
         return "zh" if lang in {"zh", "zn", "cn", "zh-cn", "zh_cn", "chinese"} else "en"
 
-    # 无 game 参数：返回 web_config.yaml
     if not game:
         web_config_path = Path(__file__).parent / "web_config.yaml"
         result = {"portraits": {}, "default_model": {}}
@@ -294,24 +282,32 @@ async def get_options(game: str | None = None):
             web_cfg = load_config(web_config_path)
             
             if isinstance(web_cfg, dict):
-                result["portraits"] = web_cfg['portraits']
-                default_model = web_cfg.get("default_model", {})
+                result["portraits"] = web_cfg.get('portraits', {})
+                default_role = web_cfg.get("default_role", {})
                 
-                default_model = dict(default_model)
-                api_key = default_model.get("api_key", "")
-                api_base = default_model.get("api_base", "")
-                if not api_key:
-                    default_model["api_key"] = os.getenv("OPENAI_API_KEY", "")
-                if not api_base:
-                    default_model["api_base"] = os.getenv("OPENAI_API_BASE", "")
-                # agent_class 字段直接传递，不需要环境变量替换
+                default_model = {}
+                if isinstance(default_role, dict):
+                    model_cfg = default_role.get("model", {})
+                    agent_cfg = default_role.get("agent", {})
+                    
+                    default_model["model_name"] = model_cfg.get("model_name", "")
+                    default_model["api_base"] = model_cfg.get("url", "") or model_cfg.get("api_base", "")
+                    default_model["api_key"] = model_cfg.get("api_key", "")
+                    default_model["temperature"] = model_cfg.get("temperature", 0.7)
+                    default_model["max_tokens"] = model_cfg.get("max_tokens", 2048)
+                    
+                    if agent_cfg:
+                        default_model["agent_class"] = agent_cfg.get("type", "")
+                    
+                    if not default_model.get("api_key"):
+                        default_model["api_key"] = os.getenv("OPENAI_API_KEY", "")
+                    if not default_model.get("api_base"):
+                        default_model["api_base"] = os.getenv("OPENAI_BASE_URL", "")
                 
                 result["default_model"] = default_model
         return result
 
-    # 有 game 参数：返回 task_config.yaml
     if game == "diplomacy":
-        # 读取 Diplomacy 配置
         yaml_path = os.environ.get("DIPLOMACY_CONFIG_YAML", "games/games/diplomacy/configs/default_config.yaml")
         diplomacy_cfg = load_config(yaml_path)['game']
         lang = _to_ui_lang(diplomacy_cfg['language'])
@@ -329,12 +325,11 @@ async def get_options(game: str | None = None):
         }
 
     if game == "avalon":
-        # 返回 Avalon 默认配置
         yaml_path = os.environ.get("AVALON_CONFIG_YAML", "games/games/avalon/configs/default_config.yaml")
         avalon_cfg = load_config(yaml_path)['game']
-        lang = _to_ui_lang(avalon_cfg.language)
 
         return {
+            "roles": avalon_cfg.get("roles_name", []),
             "defaults": {
                 "num_players": int(avalon_cfg.get("num_players", 5) or 5),
                 "language": _to_ui_lang(str(avalon_cfg.get("language", "en"))),

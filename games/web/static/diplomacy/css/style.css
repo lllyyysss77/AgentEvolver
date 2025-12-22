@@ -318,32 +318,32 @@ body {
   white-space: pre-wrap;
 }
 
-/* --- 区分 orders / negotiation / system 的背景 --- */
-/* Orders：偏“指令/羊皮纸” 느낌 */
+/* --- Distinguish backgrounds for orders / negotiation / system --- */
+/* Orders: "instruction/parchment" style */
 .chat-message.chat-orders .chat-content {
   background: linear-gradient(145deg, rgba(255, 221, 87, 0.14), rgba(255, 221, 87, 0.06));
   border-color: rgba(255, 221, 87, 0.28);
 }
 
-/* Negotiation：偏“对话/蓝紫” 느낌 */
+/* Negotiation: "conversation/blue-purple" style */
 .chat-message.chat-negotiation .chat-content {
   background: linear-gradient(145deg, rgba(116, 185, 255, 0.12), rgba(162, 155, 254, 0.06));
   border-color: rgba(116, 185, 255, 0.22);
 }
 
-/* System：偏“系统提示/灰色” 느낌（log-entry 系列） */
+/* System: "system prompt/gray" style (log-entry series) */
 .log-entry.log-system {
   background: linear-gradient(145deg, rgba(169, 190, 220, 0.12), rgba(169, 190, 220, 0.06));
   border-color: rgba(169, 190, 220, 0.22);
 }
 
-/* 中文模式下，chat 内容使用中文字体，字体大小增加6px */
+/* In Chinese mode, use Chinese font for chat content, font size increased by 6px */
 body.lang-zh .chat-content {
   font-family: "Ark Pixel", "Helvetica Neue", Arial, sans-serif;
   font-size: 15px; /* 9px + 6px = 15px */
 }
 
-/* 中文模式下，history/log 的 system/phase 等也属于“聊天框内后端推送内容” */
+/* In Chinese mode, history/log system/phase etc. are also "backend-pushed content in chat box" */
 body.lang-zh .log-entry {
   font-family: "Ark Pixel", "Helvetica Neue", Arial, sans-serif;
   font-size: 15px; /* 9px + 6px = 15px */
@@ -358,7 +358,7 @@ body.lang-en #user-input {
   font-family: "Press Start 2P", "Helvetica Neue", Arial, sans-serif !important;
 }
 
-/* 英文模式下，使用英文字体（默认） */
+/* In English mode, use English font (default) */
 body.lang-en .chat-content {
   font-family: "Press Start 2P", "Helvetica Neue", Arial, sans-serif;
 }
@@ -394,7 +394,7 @@ body.lang-en .log-entry {
 
 .log-entry.log-system {
   color: var(--muted);
-  /* background / border-color 在上面做了区分 */
+  /* background / border-color distinguished above */
 }
 
 .log-entry.log-orders {

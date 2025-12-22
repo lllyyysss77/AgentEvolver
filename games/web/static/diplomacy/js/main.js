@@ -3,7 +3,6 @@
 // Config is handled by index.html, this file only handles game display
 // =============================
 
-// 清除页面缓存：当离开游戏页面时清除游戏数据
 window.addEventListener('beforeunload', () => {
     const keysToKeep = ['gameConfig', 'selectedPortraits', 'gameLanguage'];
     Object.keys(sessionStorage).forEach(key => {
@@ -13,14 +12,12 @@ window.addEventListener('beforeunload', () => {
     });
 });
 
-// 强制不使用浏览器的 bfcache（后退/前进缓存）
 window.addEventListener('pageshow', (event) => {
     if (event.persisted) {
         window.location.reload();
     }
 });
 
-// 应用语言类到 body
 const gameLanguage = sessionStorage.getItem('gameLanguage') || 'en';
 document.body.classList.add(`lang-${gameLanguage}`);
 
@@ -39,7 +36,6 @@ let currentRenderData = {};
 let currentPrompt = null;
 let currentInputAgentId = null;
 
-// Observe buffer (accumulate obs_log_entry)
 let obsBuffer = [];
 let obsSeen = new Set();
 
@@ -233,7 +229,6 @@ function getPowerFromSender(sender) {
   return null;
 }
 
-// 从早期初始化脚本或 sessionStorage 读取选择的头像映射
 let selectedPortraits = [];
 if (window.__EARLY_INIT__ && window.__EARLY_INIT__.portraits) {
   selectedPortraits = window.__EARLY_INIT__.portraits;
@@ -244,7 +239,6 @@ if (window.__EARLY_INIT__ && window.__EARLY_INIT__.portraits) {
   } catch (e) {}
 }
 
-// 从gameConfig读取power_names顺序
 let powerNamesOrder = null;
 try {
   const gameConfigStr = sessionStorage.getItem('gameConfig');
@@ -256,11 +250,9 @@ try {
   }
 } catch (e) {}
 
-// 根据power名称获取对应的头像
 function getPortraitSrcByPower(powerName) {
   if (!powerName) return `/static/portraits/portrait_1.png`;
   
-  // 如果有power_names顺序和selectedPortraits，使用它们
   if (powerNamesOrder && selectedPortraits.length > 0) {
     const powerIndex = powerNamesOrder.findIndex(p => 
       p.toUpperCase() === powerName.toUpperCase() || 
@@ -273,23 +265,19 @@ function getPortraitSrcByPower(powerName) {
     }
   }
   
-  // 回退到旧的硬编码映射
   const powerLower = powerName.toLowerCase();
   const portraitId = POWER_PORTRAITS[powerLower] || 1;
   return `/static/portraits/portrait_${portraitId}.png`;
 }
 
 function getPortraitSrc(playerId) {
-  // 防止 NaN，确保 playerId 是有效数字
   const validId = (typeof playerId === 'number' && !isNaN(playerId)) ? playerId : 1;
   
-  // 如果有选择的头像，使用映射（diplomacy的playerId从1开始）
   if (selectedPortraits.length >= validId && validId > 0) {
     const portraitId = selectedPortraits[validId - 1];
     return `/static/portraits/portrait_${portraitId}.png`;
   }
   
-  // 否则使用默认映射
   const id = ((validId - 1) % 15) + 1;
   return `/static/portraits/portrait_${id}.png`;
 }
@@ -298,7 +286,6 @@ function renderOneLog(entry) {
   const t = logText(entry);
   const type = getLogType(entry);
   
-  // For phase markers, keep simple style
   if (type === "phase") {
     const el = document.createElement("div");
     el.classList.add("log-entry", "phase");
@@ -306,7 +293,6 @@ function renderOneLog(entry) {
     return el;
   }
   
-  // For system logs, keep simple style but with icon
   if (type === "system") {
     const el = document.createElement("div");
     el.classList.add("log-entry", "log-system");
@@ -314,16 +300,12 @@ function renderOneLog(entry) {
     return el;
   }
   
-  // For orders and negotiation, use chat bubble style
   const el = document.createElement("div");
   el.classList.add("chat-message");
-  // 给不同类型的气泡打标，便于 CSS 区分背景样式
-  // 目前只有 orders / negotiation 会进入这个分支，但这里写得更通用
   if (type) {
     el.classList.add(`chat-${type}`);
   }
   
-  // Extract sender info
   let sender = "System";
   let power = null;
   let content = t;
@@ -333,7 +315,6 @@ function renderOneLog(entry) {
     content = entry.content || entry.text || t;
   }
   
-  // Try to extract power from content patterns like "[ENGLAND]" or "ENGLAND orders:"
   const powerMatch = t.match(/^\[?([A-Z_]+)\]?\s*(orders:|:)?/i);
   if (powerMatch) {
     const extracted = powerMatch[1].toLowerCase().replace(/_/g, '');
@@ -353,15 +334,12 @@ function renderOneLog(entry) {
   // Avatar
   let avatarHtml;
   if (power) {
-    // 尝试从sender或power中提取准确的power名称
     let powerNameForPortrait = power;
     if (powerNamesOrder) {
-      // 首先尝试精确匹配power（小写）
       let matchedPower = powerNamesOrder.find(p => 
         p.toLowerCase() === power.toLowerCase()
       );
       
-      // 如果没找到，尝试从sender中匹配
       if (!matchedPower && sender && typeof sender === 'string') {
         const senderUpper = sender.toUpperCase();
         matchedPower = powerNamesOrder.find(p => 
@@ -427,7 +405,6 @@ function ensurePhaseLog(logs, state) {
   return [line, ...logs];
 }
 
-// Filters / Phase select
 if (logFilter) {
   logFilter.addEventListener("change", function () {
     currentFilter = this.value;
@@ -453,7 +430,6 @@ async function fetchHistoryList() {
   try {
     const response = await fetch("/api/history");
     if (!response.ok) {
-      // History not available (e.g., game not started yet)
       return;
     }
     let history = await response.json();
@@ -511,20 +487,15 @@ function connect() {
     console.log("[WebSocket] Connection established");
     fetchHistoryList();
     
-    // 使用早期初始化的配置（首次启动）
     if (window.__EARLY_INIT__ && window.__EARLY_INIT__.hasGameConfig && window.__EARLY_INIT__.config) {
       console.log('Found game config from early init, starting game automatically...');
       
       const config = window.__EARLY_INIT__.config;
       
-      // 清除 sessionStorage 中的 gameConfig
       sessionStorage.removeItem('gameConfig');
-      // 设置游戏正在运行标记（用于刷新后重连）
       sessionStorage.setItem('gameRunning', 'true');
-      // 清除早期初始化标记，防止重复启动
       window.__EARLY_INIT__.hasGameConfig = false;
       
-      // 启动游戏
       fetch('/api/start-game', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -537,10 +508,8 @@ function connect() {
         }
       });
     }
-    // 刷新后重连（游戏已在运行）
     else if (window.__EARLY_INIT__ && window.__EARLY_INIT__.isGameRunning) {
       console.log('Game was running, reconnecting...');
-      // 不需要启动游戏，只需要等待服务器发送状态
       window.__EARLY_INIT__.isGameRunning = false;
     }
   };
@@ -566,8 +535,6 @@ function connect() {
     }
 
     if (message.type === "mode_info") {
-      // 处理模式信息，允许 game 和 mode 为 null（游戏未启动时）
-      // 不进行任何操作，仅静默接收，避免打印警告
       return;
     }
 
@@ -579,7 +546,7 @@ function connect() {
       if (isParticipate) {
         appendToParticipateLogs(entry);
       } else {
-        appendObsEntry(entry); // 观战模式也显示聊天
+        appendObsEntry(entry);
       }
       if (!isViewingHistory) renderState(latestState, false);
       return;
@@ -601,7 +568,6 @@ function updateState(incoming) {
   const prevMap = getField(latestState, "map_svg", "");
   const nextMap = getField(incoming, "map_svg", "");
 
-  // Merge logs incrementally
   const incomingLogsRaw = getField(incoming, "logs", undefined);
   if (incomingLogsRaw !== undefined) {
     const incomingLogs = normalizeLogs(incomingLogsRaw);
@@ -615,14 +581,12 @@ function updateState(incoming) {
     latestState.logs = prevLogs;
   }
 
-  // Accumulate obs_log_entry
   const incomingObs = getField(incoming, "obs_log_entry", undefined);
   if (incomingObs !== undefined) {
     latestState.obs_log_entry = incomingObs;
     appendObsEntry(incomingObs);
   }
 
-  // Merge other fields
   for (const key in incoming) {
     if (key === "logs" || key === "obs_log_entry") continue;
     latestState[key] = incoming[key];
@@ -634,7 +598,6 @@ function updateState(incoming) {
   if (!isViewingHistory) renderState(latestState, false);
 }
 
-// Rendering
 function renderState(data, isHistory = false) {
   currentRenderData = data;
 
@@ -663,7 +626,6 @@ function renderState(data, isHistory = false) {
 
   logs = ensurePhaseLog(logs, data);
 
-  // Header/status
   const phaseEl = document.getElementById("phase");
   const roundEl = document.getElementById("round");
   const statusEl = document.getElementById("status");
@@ -676,21 +638,17 @@ function renderState(data, isHistory = false) {
   if (roundEl && round !== undefined) roundEl.textContent = `Round: ${round}`;
   if (statusEl && status) statusEl.textContent = `Status: ${status}${isHistory ? " (History View)" : ""}`;
 
-  // Map
   if (mapContainer && map_svg) {
-    // Remove placeholder if exists
     const placeholder = document.getElementById("map-placeholder");
     if (placeholder) placeholder.remove();
     
     if (mapContainer.innerHTML !== map_svg) mapContainer.innerHTML = map_svg;
   }
 
-  // Input area
   if (inputArea) {
     inputArea.style.display = (!isHistory && isParticipate) ? "block" : "none";
   }
 
-  // Logs
   if (!logsContainer) return;
 
   logsContainer.innerHTML = "";
@@ -699,7 +657,6 @@ function renderState(data, isHistory = false) {
   });
   logsContainer.scrollTop = logsContainer.scrollHeight;
 
-  // Update back/exit button based on game status
   updateBackExitButton(status);
 }
 
@@ -718,11 +675,10 @@ function updateBackExitButton(gameStatus) {
       } catch (error) {
         console.error('Error stopping game:', error);
       }
-      sessionStorage.removeItem('gameRunning');  // 清除游戏运行标记
+      sessionStorage.removeItem('gameRunning');  // Clear game running flag
       goHome();
     };
   } else {
-    // 游戏不在运行状态时，清除 gameRunning 标记
     if (gameStatus === 'stopped' || gameStatus === 'finished' || gameStatus === 'waiting') {
       sessionStorage.removeItem('gameRunning');
     }
@@ -733,7 +689,6 @@ function updateBackExitButton(gameStatus) {
   }
 }
 
-// Human input
 if (sendBtn && userInput) {
   sendBtn.addEventListener("click", sendInput);
   userInput.addEventListener("keypress", function (e) {
@@ -792,5 +747,4 @@ function handleInputRequest(message) {
   }
 }
 
-// Start
 connect();

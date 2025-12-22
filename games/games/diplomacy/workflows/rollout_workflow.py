@@ -56,10 +56,10 @@ class DiplomacyWorkflow(BaseAgentscopeWorkflow):
         task: Task,
         llm_chat_fn: Any,
         model_name: str,
-        config: Any,  # 添加
-        tokenizer: Any,  # 添加
-        data_id: str,  # 添加
-        rollout_id: str,  # 添加
+        config: Any,
+        tokenizer: Any,
+        data_id: str,
+        rollout_id: str,
         **kwargs
     ):
         super().__init__(
@@ -258,11 +258,11 @@ class DiplomacyWorkflow(BaseAgentscopeWorkflow):
         if self.data_id == "0" and self.rollout_id == "0":
             game_id = 0
         else:
-            # 使用 data_id 和 rollout_id 组合生成唯一的非0 game_id
+            # Generate unique non-zero game_id by combining data_id and rollout_id
             try:
                 data_id_int = int(self.data_id) if self.data_id.isdigit() else 9999
                 rollout_id_int = int(self.rollout_id) if self.rollout_id.isdigit() else 9999
-                game_id = data_id_int * 1000 + rollout_id_int + 1  # 确保非0
+                game_id = data_id_int * 1000 + rollout_id_int + 1  # Ensure non-zero
             except (ValueError, AttributeError):
                 game_id = 9999
         

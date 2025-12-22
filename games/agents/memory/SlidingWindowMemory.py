@@ -116,11 +116,11 @@ class SlidingWindowMemory(MemoryBase):
     async def get_memory(self) -> list[Msg]:
         """Get the memory content with sliding window."""
         
-        max_messages = 10
-        # 如果总消息数少于等于max_messages，直接返回全部
+        max_messages = 40
+        # If total messages <= max_messages, return all
         if len(self.content) <= max_messages:
             return self.content
-        # 从后往前取最新的max_messages条消息
+        # Get latest max_messages from the end
         return self.content[-max_messages:]
 
     async def clear(self) -> None:

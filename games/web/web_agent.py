@@ -10,7 +10,6 @@ from games.games.avalon.utils import Parser as AvalonParser
 
 
 class WebUserAgent(UserAgent):
-    """Web 用户代理：同步观察结果到前端，使用 WebUserInput 处理用户输入"""
     
     def __init__(self, name: str, state_manager: GameStateManager):
         super().__init__(name=name)
@@ -20,7 +19,6 @@ class WebUserAgent(UserAgent):
         self.override_instance_input_method(web_input)
     
     async def observe(self, msg: Msg | list[Msg] | None) -> None:
-        """观察消息并广播到前端（仅参与模式）"""
         await super().observe(msg)
         if self.state_manager.mode != "participate" or msg is None:
             return
@@ -45,7 +43,6 @@ class WebUserAgent(UserAgent):
 
 
 class ObserveAgent(AgentBase):
-    """观察者代理：将所有消息转发到前端"""
     
     def __init__(self, name: str, state_manager: GameStateManager, **kwargs):
         super().__init__(**kwargs)
@@ -53,7 +50,6 @@ class ObserveAgent(AgentBase):
         self.state_manager = state_manager
     
     async def observe(self, msg: Msg | list[Msg] | None) -> None:
-        """观察消息并广播到前端"""
         messages = msg if isinstance(msg, list) else [msg]
         for m in messages:
             if isinstance(m, Msg):
@@ -67,6 +63,5 @@ class ObserveAgent(AgentBase):
             )
     
     def reply(self, x: dict = None) -> Msg:
-        """观察者不参与游戏，返回空消息"""
         return Msg(self.name, content="", role="assistant")
 

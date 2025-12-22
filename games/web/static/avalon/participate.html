@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Avalon Game - Participate Mode</title>
     <link rel="stylesheet" href="/static/avalon/css/style.css?v=20251214">
-    <!-- 早期初始化脚本：在页面渲染之前设置正确的显示状态和预加载数据 -->
     <script>
-        // 全局变量，供后续 JS 文件使用
         window.__EARLY_INIT__ = { hasGameConfig: false, isGameRunning: false, config: null, portraits: null };
         (function() {
             try {
@@ -15,18 +13,15 @@
                 var portraitsStr = sessionStorage.getItem('selectedPortraits');
                 var gameRunning = sessionStorage.getItem('gameRunning') === 'true';
                 
-                // 优先检查 gameConfig（首次启动）
                 if (gameConfigStr) {
                     window.__EARLY_INIT__.hasGameConfig = true;
                     window.__EARLY_INIT__.config = JSON.parse(gameConfigStr);
                     document.documentElement.classList.add('auto-start');
                 }
-                // 其次检查 gameRunning（刷新后重连）
                 else if (gameRunning) {
                     window.__EARLY_INIT__.isGameRunning = true;
                     document.documentElement.classList.add('auto-start');
                 }
-                // 都没有则显示 config
                 else {
                     document.documentElement.classList.add('manual-start');
                 }
@@ -40,7 +35,6 @@
         })();
     </script>
     <style>
-        /* 根据初始状态隐藏/显示元素，避免闪烁 */
         html.auto-start #game-setup { display: none !important; }
         html.auto-start #messages-container { display: flex !important; }
         html.auto-start .input-container { display: flex !important; }
@@ -68,7 +62,6 @@
         
         <div class="main-content">
             <div class="map-container" id="game-visual-container">
-                <!-- Game Setup Form (Overlay) -->
                 <div id="game-setup" class="game-setup" style="display: none;">
                     <h3>⚔ Game Configuration</h3>
                     <div class="setup-form">
@@ -104,7 +97,6 @@
                     </div>
                 </div>
 
-                <!-- Pixel Table Scene -->
                 <div class="table-scene">
                     <div class="pixel-table"></div>
                     <div class="table-players" id="table-players"></div>
@@ -120,7 +112,6 @@
                         </div>
                     </div>
                     
-                    <!-- Input Area -->
                     <div class="input-container">
                         <div id="user-input-request" style="display: none;">
                             <strong>Action Required:</strong> <span id="input-prompt">Please enter your move...</span>

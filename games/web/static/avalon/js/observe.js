@@ -1,6 +1,5 @@
 // Observe mode JavaScript - Pixel Town Style
 
-// 清除页面缓存：当离开游戏页面时清除游戏数据
 window.addEventListener('beforeunload', () => {
     const keysToKeep = ['gameConfig', 'selectedPortraits', 'gameLanguage'];
     Object.keys(sessionStorage).forEach(key => {
@@ -10,7 +9,6 @@ window.addEventListener('beforeunload', () => {
     });
 });
 
-// 强制不使用浏览器的 bfcache（后退/前进缓存）
 window.addEventListener('pageshow', (event) => {
     if (event.persisted) {
         window.location.reload();
@@ -33,11 +31,9 @@ let messageCount = 0;
 let gameStarted = false;
 let numPlayers = 5;
 
-// 应用语言类到 body
 const gameLanguage = sessionStorage.getItem('gameLanguage') || 'en';
 document.body.classList.add(`lang-${gameLanguage}`);
 
-// 从早期初始化脚本或 sessionStorage 读取配置
 let selectedPortraits = [];
 if (window.__EARLY_INIT__ && window.__EARLY_INIT__.portraits) {
     selectedPortraits = window.__EARLY_INIT__.portraits;
@@ -48,7 +44,6 @@ if (window.__EARLY_INIT__ && window.__EARLY_INIT__.portraits) {
     } catch (e) {}
 }
 
-// 从早期初始化读取 numPlayers 和 agent_configs
 let agentConfigs = {};
 if (window.__EARLY_INIT__ && window.__EARLY_INIT__.config) {
     const config = window.__EARLY_INIT__.config;
@@ -72,40 +67,32 @@ if (window.__EARLY_INIT__ && window.__EARLY_INIT__.config) {
     } catch (e) {}
 }
 
-// Portrait helper - 使用选择的头像映射
 function getPortraitSrc(playerId) {
-    // 防止 NaN，确保 playerId 是有效数字
     const validId = (typeof playerId === 'number' && !isNaN(playerId)) ? playerId : 0;
     
     console.log(`getPortraitSrc (observe): playerId=${playerId}, validId=${validId}, selectedPortraits=`, selectedPortraits);
     
-    // 如果有选择的头像，使用映射
     if (selectedPortraits && selectedPortraits.length > validId) {
         const portraitId = selectedPortraits[validId];
         console.log(`Player ${validId} -> selectedPortraits[${validId}] = ${portraitId}`);
         return `/static/portraits/portrait_${portraitId}.png`;
     }
     
-    // 否则使用默认映射
     const id = (validId % 15) + 1;
     console.log(`Player ${validId} using default portrait ${id}`);
     return `/static/portraits/portrait_${id}.png`;
 }
 
-// 获取模型名字
 function getModelName(playerId) {
     const validId = (typeof playerId === 'number' && !isNaN(playerId)) ? playerId : 0;
     
-    // 根据 playerId 找到对应的 portraitId
     let portraitId = null;
     if (selectedPortraits && selectedPortraits.length > validId) {
         portraitId = selectedPortraits[validId];
     } else {
-        // 使用默认映射
         portraitId = (validId % 15) + 1;
     }
     
-    // 从 agent_configs 中获取模型名字（键可能是字符串或数字）
     if (portraitId && agentConfigs) {
         const config = agentConfigs[portraitId] || agentConfigs[String(portraitId)];
         if (config && config.base_model) {
@@ -113,11 +100,9 @@ function getModelName(playerId) {
         }
     }
     
-    // 如果没有配置，返回默认值
     return 'Unknown';
 }
 
-// Polar positions for table seating
 function polarPositions(count, radiusX, radiusY) {
     return Array.from({ length: count }).map((_, i) => {
         const angle = (Math.PI * 2 * i) / count - Math.PI / 2;
@@ -125,7 +110,6 @@ function polarPositions(count, radiusX, radiusY) {
     });
 }
 
-// Setup table players
 function setupTablePlayers(count) {
     numPlayers = count;
     tablePlayers.innerHTML = '';
@@ -133,9 +117,8 @@ function setupTablePlayers(count) {
     const rect = tablePlayers.getBoundingClientRect();
     const cx = rect.width / 2;
     const cy = rect.height / 2;
-    // 增大分布半径，让人物分布更分散
-    const radiusX = Math.min(300, Math.max(160, rect.width * 0.45)); // 从0.34增大到0.45，最大值从210增大到300
-    const radiusY = Math.min(180, Math.max(100, rect.height * 0.40)); // 从0.30增大到0.40，最大值从120增大到180
+    const radiusX = Math.min(300, Math.max(160, rect.width * 0.45));
+    const radiusY = Math.min(180, Math.max(100, rect.height * 0.40));
     const positions = polarPositions(count, radiusX, radiusY);
     
     for (let i = 0; i < count; i++) {
@@ -152,7 +135,6 @@ function setupTablePlayers(count) {
         `;
         seat.style.left = `${cx + positions[i].x - 34}px`;
         seat.style.top = `${cy + positions[i].y - 34}px`;
-        // 使用 CSS 变量保存基础旋转角度，让动画可以叠加抖动效果
         const baseRotation = (i % 2 ? 1 : -1) * 2;
         seat.style.setProperty('--base-rotation', `${baseRotation}deg`);
         seat.style.transform = `rotate(var(--base-rotation, 0deg))`;
@@ -160,17 +142,15 @@ function setupTablePlayers(count) {
     }
 }
 
-// Highlight speaking player with bubble animation
 function highlightSpeaker(playerId) {
     document.querySelectorAll('.seat').forEach(seat => {
         const isSpeaking = seat.dataset.playerId === String(playerId);
         
         if (isSpeaking && !seat.classList.contains('speaking')) {
-            // 重新触发气泡动画：先移除再添加
             const bubble = seat.querySelector('.speech-bubble');
             if (bubble) {
                 bubble.style.animation = 'none';
-                bubble.offsetHeight; // 强制 reflow
+                bubble.offsetHeight;
                 bubble.style.animation = '';
             }
         }
@@ -205,7 +185,7 @@ function addMessage(message) {
         avatarHtml = '<div class="chat-avatar system">⚔</div>';
     } else if (message.sender && message.sender.startsWith('Player')) {
         senderType = 'agent';
-        // 支持 "Player0", "Player 0", "Player1" 等格式
+        // Support formats like "Player0", "Player 0", "Player1"
         const match = message.sender.match(/Player\s*(\d+)/);
         if (match) {
             playerId = parseInt(match[1], 10);
@@ -262,15 +242,12 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// 更新角色标签显示
 function updateRoleLabels(roles) {
-    // roles 格式: [{role_id, role_name, is_good}, ...] 或 [[role_id, role_name, is_good], ...]
     if (!roles || !Array.isArray(roles)) {
         return;
     }
     
     roles.forEach((roleInfo, playerId) => {
-        // 支持两种格式：对象或数组
         const roleName = roleInfo.role_name || roleInfo[1] || '';
         
         if (!roleName) return;
@@ -286,7 +263,6 @@ function updateRoleLabels(roles) {
     });
 }
 
-// WebSocket message handlers
 wsClient.onMessage('message', (message) => {
     addMessage(message);
 });
@@ -294,7 +270,6 @@ wsClient.onMessage('message', (message) => {
 wsClient.onMessage('game_state', (state) => {
     updateGameState(state);
     
-    // 如果状态中包含角色信息，更新座位标签
     if (state.roles && Array.isArray(state.roles)) {
         updateRoleLabels(state.roles);
     }
@@ -326,7 +301,6 @@ wsClient.onMessage('game_state', (state) => {
 
 wsClient.onMessage('mode_info', (info) => {
     console.log('Mode info:', info);
-    // 只在 mode 不为 null 且不等于期望值时才警告
     if (info.mode !== null && info.mode !== undefined && info.mode !== 'observe') {
         console.warn('Expected observe mode, got:', info.mode);
     }
@@ -390,20 +364,15 @@ wsClient.onConnect(() => {
     gameStarted = false;
     messageCount = 0;
     
-    // 使用早期初始化的配置（首次启动）
     if (window.__EARLY_INIT__ && window.__EARLY_INIT__.hasGameConfig && window.__EARLY_INIT__.config) {
         console.log('Found game config from early init, starting game automatically...');
         
         const config = window.__EARLY_INIT__.config;
         
-        // 清除 sessionStorage 中的 gameConfig
         sessionStorage.removeItem('gameConfig');
-        // 设置游戏正在运行标记
         sessionStorage.setItem('gameRunning', 'true');
-        // 清除早期初始化标记，防止重复启动
         window.__EARLY_INIT__.hasGameConfig = false;
         
-        // 启动游戏
         fetch('/api/start-game', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -416,7 +385,6 @@ wsClient.onConnect(() => {
             }
         });
     }
-    // 刷新后重连
     else if (window.__EARLY_INIT__ && window.__EARLY_INIT__.isGameRunning) {
         console.log('Game was running, reconnecting...');
         window.__EARLY_INIT__.isGameRunning = false;
@@ -427,20 +395,15 @@ wsClient.onDisconnect(() => {
     console.log('Disconnected from game server');
 });
 
-// 初始化桌面并连接 WebSocket
 function initializeObserve() {
-    // 初始化圆桌（数据已在脚本开头从 __EARLY_INIT__ 或 sessionStorage 加载）
     setupTablePlayers(numPlayers);
     
-    // 连接 WebSocket
     wsClient.connect();
 }
 
-// 等待 DOM 加载完成后初始化
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeObserve);
 } else {
-    // DOM 已经加载完成，立即执行
     initializeObserve();
 }
 

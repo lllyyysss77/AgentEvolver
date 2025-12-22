@@ -135,7 +135,7 @@ class EnglishPrompts:
 
 
 class ChinesePrompts:
-    """中文提示词，用于指导阿瓦隆游戏。"""
+    """Chinese prompts for Avalon game."""
 
     # System prompt and game rules (broadcasted to all players at game start)
     system_prompt_template = dedent(

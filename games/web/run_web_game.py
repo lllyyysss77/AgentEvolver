@@ -25,11 +25,87 @@ from games.agents.thinking_react_agent import ThinkingReActAgent
 from games.utils import load_agent_class
 from games.games.avalon.game import avalon_game
 from games.games.avalon.engine import AvalonBasicConfig
+from games.games.avalon.workflows.eval_workflow import RoleManager
+from games.games.avalon.engine import AvalonGameEnvironment
 
 
 from games.games.diplomacy.engine import DiplomacyConfig
 from games.games.diplomacy.game import diplomacy_game
+from games.utils import (
+    load_config,
+    create_agent_from_config,
+    create_model_from_config,
+    deep_merge,
+)
 
+import copy
+
+def _get_role_config(
+    config_dict: Dict[str, Any],
+    role_identifiers: list[str],
+    frontend_cfg: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """
+    Get complete role configuration with priority-based lookup for multiple role identifiers.
+    
+    Args:
+        config_dict: Configuration dict (contains default_role and roles)
+        role_identifiers: List of role identifiers in priority order (e.g., ["Merlin_0", "Merlin"] or ["AUSTRIA"])
+        frontend_cfg: Frontend config override (optional)
+    
+    Returns:
+        Merged role configuration
+    """
+    default_role = config_dict.get('default_role', {})
+    roles_config = config_dict.get('roles', {})
+    
+    if not isinstance(default_role, dict):
+        default_role = {}
+    if not isinstance(roles_config, dict):
+        roles_config = {}
+    
+    # Start with default_role
+    role_config = copy.deepcopy(default_role)
+    
+    # Find role-specific config by priority
+    specific_role_config = None
+    for identifier in role_identifiers:
+        # Try exact match (case-sensitive)
+        if identifier in roles_config:
+            specific_role_config = roles_config[identifier]
+            break
+        # Try case-insensitive match
+        identifier_upper = identifier.upper()
+        for k, v in roles_config.items():
+            if k.upper() == identifier_upper:
+                specific_role_config = v
+                break
+        if specific_role_config:
+            break
+    
+    # Merge role-specific config
+    if specific_role_config and isinstance(specific_role_config, dict):
+        role_config = deep_merge(role_config, specific_role_config)
+    
+    # Finally apply frontend config override if present
+    if frontend_cfg and isinstance(frontend_cfg, dict):
+        frontend_role_config = {}
+        if frontend_cfg.get("base_model"):
+            frontend_role_config["model"] = {
+                "model_name": frontend_cfg.get("base_model"),
+                "url": frontend_cfg.get("api_base") or os.getenv("OPENAI_BASE_URL", ""),
+                "api_key": frontend_cfg.get("api_key") or os.getenv("OPENAI_API_KEY", ""),
+            }
+        if frontend_cfg.get("agent_class"):
+            frontend_role_config["agent"] = {
+                "type": frontend_cfg.get("agent_class"),
+                "kwargs": {}
+            }
+        
+        if frontend_role_config:
+            role_config = deep_merge(role_config, frontend_role_config)
+    
+    return role_config
 
 async def run_avalon(
     state_manager: GameStateManager,
@@ -41,13 +117,11 @@ async def run_avalon(
     selected_portrait_ids: list[int] | None = None,
     agent_configs: Dict[int, Dict[str, str]] | None = None,
 ):
-    """运行 Avalon 游戏"""
+    """Run Avalon game"""
     config = AvalonBasicConfig.from_num_players(num_players)
     
-    yaml_path = os.environ.get("AVALON_CONFIG_YAML", "games/games/avalon/configs/task_config.yaml")
+    yaml_path = os.environ.get("AVALON_CONFIG_YAML", "games/games/avalon/configs/default_config.yaml")
     task_cfg = load_config(yaml_path)
-    default_model = task_cfg.get("default_model", {})
-    roles_config = task_cfg.get("roles", {})
     
     if not selected_portrait_ids:
         selected_portrait_ids = list(range(1, num_players + 1))
@@ -57,7 +131,18 @@ async def run_avalon(
     if mode == "observe":
         observe_agent = ObserveAgent(name="Observer", state_manager=state_manager)
     
-    ai_portrait_index = 0 #ai玩家索引
+    ai_portrait_index = 0  # AI player index
+
+    # Use RoleManager to manage roles
+    # If no preset_roles, use AvalonGameEnvironment to generate default roles
+    if preset_roles is None:
+        print("No preset roles, using AvalonGameEnvironment to generate default roles")
+        env = AvalonGameEnvironment(config)
+        assigned_roles = env.get_roles()
+    else:
+        assigned_roles = preset_roles
+    
+    role_manager = RoleManager(assigned_roles)
 
     for i in range(num_players):
         if mode == "participate" and i == user_agent_id:
@@ -71,63 +156,36 @@ async def run_avalon(
                     portrait_id = i + 1
             else:
                 portrait_id = selected_portrait_ids[i] if i < len(selected_portrait_ids) else (i + 1)
-            # 优先级：agent_configs > roles_config[role_name] > default_model > 环境变量
             
-            # 1. 优先使用前端传递的 agent 配置
+            # Get frontend config
             frontend_cfg = None
             if agent_configs and portrait_id in agent_configs:
                 frontend_cfg = agent_configs[portrait_id]
             
-            # 获取 agent_class（优先级：frontend_cfg > roles_config > default_model）
-            agent_class_path = None
-            if frontend_cfg and frontend_cfg.get("base_model"):
-                model_name = frontend_cfg.get("base_model", os.getenv("MODEL_NAME", "qwen-plus"))
-                api_base = frontend_cfg.get("api_base") or os.getenv("OPENAI_API_BASE", "")
-                api_key = frontend_cfg.get("api_key") or os.getenv("OPENAI_API_KEY", "")
-                agent_class_path = frontend_cfg.get("agent_class", "")
-            else:
-                # 2. 从 task_config.yaml 的 roles 中查找（如果有 preset_roles）
-                role_name = None
-                if preset_roles:
-                    # 从 preset_roles 中找到玩家 i 对应的角色名称
-                    for role_id, name, _ in preset_roles:
-                        if role_id == i:
-                            role_name = name
-                            break
-                
-                # 从 roles_config 中查找角色配置，如果没有则使用 default_model
-                model_cfg = roles_config.get(role_name) if role_name and isinstance(roles_config, dict) and role_name in roles_config else {}
-                
-                # 合并 default_model 和 model_cfg（model_cfg 优先）
-                merged_cfg = dict(default_model)
-                if isinstance(model_cfg, dict):
-                    merged_cfg.update(model_cfg)
-                
-                model_name = merged_cfg.get("model_name", os.getenv("MODEL_NAME", "qwen-plus"))
-                api_key = merged_cfg.get("api_key") or os.getenv("OPENAI_API_KEY", "")
-                api_base = merged_cfg.get("api_base") or merged_cfg.get("url") or os.getenv("OPENAI_API_BASE", "")
-                agent_class_path = merged_cfg.get("agent_class", "")
-
+            # Use RoleManager to get role identifiers
+            indexed_role = role_manager.get_indexed_role(i)
+            base_role = role_manager.get_role_name(i)
             
-            model_kwargs = {
-                'model_name': model_name,
-                'api_key': api_key,
-                'stream': False,
-            }
-            if api_base:
-                model_kwargs['client_args'] = {'base_url': api_base}
-            model = OpenAIChatModel(**model_kwargs)
-
-            # 使用 load_agent_class 加载 agent class
-            AgentClass = load_agent_class(agent_class_path if agent_class_path else None)
-            agent = AgentClass(
-                name=f"Player{i}",
-                sys_prompt="",
-                model=model,
-                formatter=DashScopeMultiAgentFormatter(),
-                memory=InMemoryMemory(),
-                toolkit=Toolkit(),
+            # Use unified _get_role_config function to get config
+            role_config = _get_role_config(
+                task_cfg,
+                role_identifiers=[indexed_role, base_role],  # Priority: indexed_role first, then base_role
+                frontend_cfg=frontend_cfg,
             )
+            
+            # Extract model and agent config
+            model_config = role_config.get('model', {})
+            agent_config = role_config.get('agent', {})
+            
+            # Use factory functions to create model and agent
+            model = create_model_from_config(model_config)
+            agent = create_agent_from_config(
+                agent_config=agent_config,
+                model=model,
+                name=f"Player{i}",
+                actor_rollout_ref=None,
+            )
+            
         agents.append(agent)
 
     state_manager.set_mode(mode, str(user_agent_id) if mode == "participate" else None, game="avalon")
@@ -145,7 +203,7 @@ async def run_avalon(
         web_mode=mode,
         web_observe_agent=observe_agent,
         state_manager=state_manager,
-        preset_roles=preset_roles,
+        preset_roles=assigned_roles,  # Use assigned_roles (may be generated or preset)
     )
 
     if good_wins is None or state_manager.should_stop:
@@ -173,11 +231,8 @@ async def run_diplomacy(
     """Run Diplomacy game."""
     agentscope.init()
 
-    # 从 task_config.yaml 读取默认模型配置作为保底
-    yaml_path = os.environ.get("DIPLOMACY_CONFIG_YAML", "games/games/diplomacy/configs/task_config.yaml")
+    yaml_path = os.environ.get("DIPLOMACY_CONFIG_YAML", "games/games/diplomacy/configs/default_config.yaml")
     task_cfg = load_config(yaml_path)
-    default_model = task_cfg.get("default_model", {})
-    roles_config = task_cfg.get("roles", {})
 
     agents = []
     observe_agent = None
@@ -189,64 +244,33 @@ async def run_diplomacy(
             agent = WebUserAgent(name=power, state_manager=state_manager)
             state_manager.user_agent_id = agent.id
         else:
-            # 优先级：agent_configs > roles_config[power] > roles_config["default"] > default_model > 环境变量
             portrait_id = None
             frontend_cfg = None
             if selected_portrait_ids and power_idx < len(selected_portrait_ids):
                 portrait_id = selected_portrait_ids[power_idx]
-                # 跳过占位符（-1 表示 human player 或空位）
                 if portrait_id is not None and portrait_id != -1:
                     if agent_configs and portrait_id in agent_configs:
                         frontend_cfg = agent_configs[portrait_id]
-                else:
-                    portrait_id = None  # 将占位符转换为 None 以便调试输出
-            
-            # 获取 agent_class（优先级：frontend_cfg > roles_config > default_model）
-            agent_class_path = None
-            if frontend_cfg and frontend_cfg.get("base_model"):
-                # 1. 优先使用前端传递的 agent 配置
-                model_name = frontend_cfg.get("base_model", os.getenv("MODEL_NAME", "qwen-plus"))
-                api_base = frontend_cfg.get("api_base") or os.getenv("OPENAI_API_BASE", "")
-                api_key = frontend_cfg.get("api_key") or os.getenv("OPENAI_API_KEY", "")
-                agent_class_path = frontend_cfg.get("agent_class", "")
-            else:
-                # 2. 从 task_config.yaml 的 roles 中查找
-                model_cfg = roles_config.get(power) or roles_config.get("default", {})
-                
-                # 合并 default_model 和 model_cfg（model_cfg 优先）
-                merged_cfg = dict(default_model)
-                if isinstance(model_cfg, dict):
-                    merged_cfg.update(model_cfg)
-                
-                model_name = merged_cfg.get("model_name", os.getenv("MODEL_NAME", "qwen-plus"))
-                api_key = merged_cfg.get("api_key") or os.getenv("OPENAI_API_KEY", "")
-                api_base = merged_cfg.get("api_base") or merged_cfg.get("url") or os.getenv("OPENAI_API_BASE", "")
-                agent_class_path = merged_cfg.get("agent_class", "")
-            
 
-            model_kwargs = {
-                'model_name': model_name,
-                'api_key': api_key,
-                'stream': False,
-            }
-            if api_base:
-                model_kwargs['client_args'] = {'base_url': api_base}
-            model = OpenAIChatModel(**model_kwargs)
+            role_config = _get_role_config(
+                task_cfg,
+                role_identifiers=[power],
+                frontend_cfg=frontend_cfg,
+            )
             
-            # 使用 load_agent_class 加载 agent class
-            AgentClass = load_agent_class(agent_class_path if agent_class_path else None)
-            agent = AgentClass(
-                name=power,
-                sys_prompt="",
+            model_config = role_config.get('model', {})
+            agent_config = role_config.get('agent', {})
+            
+            model = create_model_from_config(model_config)
+            agent = create_agent_from_config(
+                agent_config=agent_config,
                 model=model,
-                formatter=DashScopeMultiAgentFormatter(),
-                memory=InMemoryMemory(),
-                toolkit=Toolkit(),
+                name=power,
+                actor_rollout_ref=None,
             )
             agent.power_name = power
             agent.set_console_output_enabled(True)
         agents.append(agent)
-
     state_manager.set_mode(mode, config.human_power if mode == "participate" else None, game="diplomacy")
     state_manager.update_game_state(status="running", human_power=config.human_power if mode == "participate" else None)
     await state_manager.broadcast_message(state_manager.format_game_state())
@@ -289,15 +313,12 @@ def start_game_thread(
     power_names: list[str] | None = None,
     power_models: Dict[str, str] | None = None,
 ):
-    """在后台线程中启动游戏"""
     def run():
         try:
-            # 创建新的事件循环（每个线程需要自己的事件循环）
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
             if game == "avalon":
-                # 解析前端传入的角色分配
                 preset_roles_tuples: list[tuple[int, str, bool]] | None = None
                 if preset_roles:
                     try:
@@ -311,7 +332,6 @@ def start_game_thread(
                 
                 portrait_ids = selected_portrait_ids if selected_portrait_ids else list(range(1, num_players + 1))
                 
-                # 创建任务并保存引用，以便可以取消
                 task = loop.create_task(run_avalon(
                     state_manager=state_manager,
                     num_players=num_players,
@@ -329,11 +349,9 @@ def start_game_thread(
                 except asyncio.CancelledError:
                     pass
                 finally:
-                    # 清理未完成的任务
                     pending = asyncio.all_tasks(loop)
                     for t in pending:
                         t.cancel()
-                    # 等待所有任务完成或取消
                     if pending:
                         loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             else:
@@ -345,7 +363,6 @@ def start_game_thread(
                 if power_names:
                     cfg.power_names = list(power_names)
                 
-                # 创建任务并保存引用，以便可以取消
                 task = loop.create_task(run_diplomacy(
                     state_manager=state_manager,
                     config=cfg,
@@ -360,11 +377,9 @@ def start_game_thread(
                 except asyncio.CancelledError:
                     pass
                 finally:
-                    # 清理未完成的任务
                     pending = asyncio.all_tasks(loop)
                     for t in pending:
                         t.cancel()
-                    # 等待所有任务完成或取消
                     if pending:
                         loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         except Exception as e:
@@ -407,7 +422,6 @@ def main():
         negotiation_rounds=args.negotiation_rounds,
         power_models={},
     )
-    # Keep main thread alive
     while True:
         asyncio.sleep(1)
 

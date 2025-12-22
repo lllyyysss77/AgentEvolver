@@ -10,8 +10,7 @@ from agentscope.message import TextBlock
 from games.web.game_state_manager import GameStateManager
 
 
-class WebUserInput(UserInputBase):
-    """Web 用户输入处理器：通过 WebSocket 等待前端输入"""
+class WebUserInput(UserInputBase):  
     
     def __init__(self, state_manager: GameStateManager):
         self.state_manager = state_manager

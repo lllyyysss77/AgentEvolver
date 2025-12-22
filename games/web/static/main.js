@@ -1,24 +1,17 @@
-// ============================================================
-// 像素小镇 - 主逻辑
-// ============================================================
-
-// -------------------- 配置与常量 --------------------
 const CONFIG = {
   portraitsBase: "/static/portraits/",
   portraitCount: 15,
   travelDuration: 260,
 };
 
-// -------------------- 数据模型 - 统一的 localStorage 管理 --------------------
 const STORAGE_KEYS = {
   AGENT_CONFIGS: "AgentConfigs.v1",
-  GAME_OPTIONS: "GameOptions.v1",  // 存储 /api/options 返回的游戏配置
-  WEB_CONFIG_LOADED: "WebConfigLoaded.v1",  // 标记是否已加载过 web_config.yaml
-  LAST_GAME_OPTIONS: "LastGameOptions.v1",  // 存储上次选择的游戏配置
-  CONFIG_UPDATE_TIME: "ConfigUpdateTime.v1",  // 配置更新时间戳
+  GAME_OPTIONS: "GameOptions.v1",
+  WEB_CONFIG_LOADED: "WebConfigLoaded.v1",
+  LAST_GAME_OPTIONS: "LastGameOptions.v1",
+  CONFIG_UPDATE_TIME: "ConfigUpdateTime.v1",
 };
 
-// 加载角色配置（从 localStorage）
 function loadAgentConfigs() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.AGENT_CONFIGS);
@@ -28,7 +21,6 @@ function loadAgentConfigs() {
   }
 }
 
-// 保存角色配置（到 localStorage）
 function saveAgentConfigs(configs) {
   try {
     localStorage.setItem(STORAGE_KEYS.AGENT_CONFIGS, JSON.stringify(configs));
@@ -37,7 +29,6 @@ function saveAgentConfigs(configs) {
   }
 }
 
-// 加载游戏配置（从 localStorage）
 function loadGameOptions() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.GAME_OPTIONS);
@@ -47,7 +38,6 @@ function loadGameOptions() {
   }
 }
 
-// 保存游戏配置（到 localStorage）
 function saveGameOptions(options) {
   try {
     localStorage.setItem(STORAGE_KEYS.GAME_OPTIONS, JSON.stringify(options));
@@ -56,30 +46,41 @@ function saveGameOptions(options) {
   }
 }
 
-// 检查是否首次加载（或需要重新加载 web_config.yaml）
 function shouldLoadWebConfig() {
   const loaded = localStorage.getItem(STORAGE_KEYS.WEB_CONFIG_LOADED);
   return !loaded || loaded !== "true";
 }
 
-// 标记 web_config.yaml 已加载
 function markWebConfigLoaded() {
   localStorage.setItem(STORAGE_KEYS.WEB_CONFIG_LOADED, "true");
 }
 
-// 从后端获取 web_config.yaml 配置并更新到 localStorage（仅在首次加载时调用）
 async function loadWebConfig() {
   if (window.location.protocol === "file:") {
-    return; // 本地文件协议不支持 fetch
-  }
-  
-  // 检查是否已加载过
-  if (!shouldLoadWebConfig()) {
     return;
   }
   
+  const fromCharacterConfig = sessionStorage.getItem('fromCharacterConfig');
+  if (fromCharacterConfig === 'true') {
+    sessionStorage.removeItem('fromCharacterConfig');
+    
+    const hasLoaded = shouldLoadWebConfig() === false;
+    if (hasLoaded) {
+      const existingConfigs = loadAgentConfigs();
+      const configCount = Object.keys(existingConfigs).length;
+      if (configCount >= 1) {
+        return;
+      }
+      localStorage.removeItem(STORAGE_KEYS.WEB_CONFIG_LOADED);
+      
+    }
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.AGENT_CONFIGS)
+    localStorage.removeItem(STORAGE_KEYS.WEB_CONFIG_LOADED);
+  }
+  
   try {
-    const resp = await fetch("/api/options"); // 不带 game 参数，返回 web_config.yaml
+    const resp = await fetch("/api/options");
     if (!resp.ok) {
       console.warn("Failed to fetch web config:", resp.status);
       return;
@@ -87,24 +88,69 @@ async function loadWebConfig() {
     
     const webOpts = await resp.json();
     const portraits = webOpts.portraits || {};
+    const defaultModel = webOpts.default_model || {};
     
-    // 合并到现有的 localStorage 配置中
     const existingConfigs = loadAgentConfigs();
     let updated = false;
     
-    for (const [idStr, portraitCfg] of Object.entries(portraits)) {
-      const id = parseInt(idStr, 10);
-      if (isNaN(id) || id < 1 || id > CONFIG.portraitCount) continue;
+    for (let id = 1; id <= CONFIG.portraitCount; id++) {
+      if (!existingConfigs[id]) {
+        existingConfigs[id] = {};
+      }
       
-      // 如果 web_config.yaml 中有 name，且 localStorage 中没有，则更新
-      if (portraitCfg && typeof portraitCfg === "object" && portraitCfg.name) {
-        if (!existingConfigs[id] || !existingConfigs[id].name) {
-          if (!existingConfigs[id]) {
-            existingConfigs[id] = {};
-          }
+      const portraitCfg = portraits[id];
+      const hasPortraitCfg = portraitCfg && typeof portraitCfg === "object";
+      
+      if (hasPortraitCfg && portraitCfg.name) {
+        if (!existingConfigs[id].name) {
           existingConfigs[id].name = portraitCfg.name;
           updated = true;
         }
+      }
+      
+      let modelName = null;
+      if (hasPortraitCfg && portraitCfg.model && portraitCfg.model.model_name) {
+        modelName = portraitCfg.model.model_name;
+      } else if (defaultModel.model_name) {
+        modelName = defaultModel.model_name;
+      }
+      if (modelName && !existingConfigs[id].base_model) {
+        existingConfigs[id].base_model = modelName;
+        updated = true;
+      }
+      
+      let apiBase = null;
+      if (hasPortraitCfg && portraitCfg.model) {
+        apiBase = portraitCfg.model.url || portraitCfg.model.api_base || null;
+      }
+      if (!apiBase && defaultModel.api_base) {
+        apiBase = defaultModel.api_base;
+      }
+      if (apiBase && !existingConfigs[id].api_base) {
+        existingConfigs[id].api_base = apiBase;
+        updated = true;
+      }
+      
+      let apiKey = null;
+      if (hasPortraitCfg && portraitCfg.model && portraitCfg.model.api_key) {
+        apiKey = portraitCfg.model.api_key;
+      } else if (defaultModel.api_key) {
+        apiKey = defaultModel.api_key;
+      }
+      if (apiKey && !existingConfigs[id].api_key) {
+        existingConfigs[id].api_key = apiKey;
+        updated = true;
+      }
+      
+      let agentClass = null;
+      if (hasPortraitCfg && portraitCfg.agent && portraitCfg.agent.type) {
+        agentClass = portraitCfg.agent.type;
+      } else if (defaultModel.agent_class) {
+        agentClass = defaultModel.agent_class;
+      }
+      if (agentClass && !existingConfigs[id].agent_class) {
+        existingConfigs[id].agent_class = agentClass;
+        updated = true;
       }
     }
     
@@ -112,7 +158,6 @@ async function loadWebConfig() {
       saveAgentConfigs(existingConfigs);
     }
     
-    // 标记已加载
     markWebConfigLoaded();
   } catch (e) {
     console.warn("Failed to load web config:", e);
@@ -120,7 +165,6 @@ async function loadWebConfig() {
 }
 
 
-// Avalon role mapping (role_name -> role_id)
 const AVALON_ROLE_MAP = {
   "Merlin": 0,
   "Percival": 1,
@@ -132,21 +176,19 @@ const AVALON_GOOD_ROLES = ["Merlin", "Percival", "Servant"];
 
 const state = {
   selectedIds: new Set(),
-  selectedIdsOrder: [],  // 保持选中顺序的数组
+  selectedIdsOrder: [],
   selectedGame: "",
   selectedMode: "observe",
   diplomacyOptions: null,
-  // 预览结果（用于下发给后端）
+  avalonOptions: null,
   diplomacyPowerOrder: null,
   avalonRoleOrder: null,
   avalonPreviewRoles: null,  // [{role_id, role_name, is_good}, ...]
   diplomacyPreviewPowers: null,  // [power_name, ...]
 };
 
-// DOM 引用 - 将在init中初始化
 let DOM = {};
 
-// -------------------- 工具函数 --------------------
 function polarPositions(count, radiusX, radiusY) {
   return Array.from({ length: count }).map((_, i) => {
     const angle = (Math.PI * 2 * i) / count - Math.PI / 2;
@@ -159,7 +201,6 @@ function computeRedirectUrl(game, mode) {
   return `./static/${game}/${mode}.html`;
 }
 
-// -------------------- 状态消息 --------------------
 function addStatusMessage(text) {
   if (!DOM.statusLog) return;
 
@@ -168,12 +209,10 @@ function addStatusMessage(text) {
   bubble.textContent = text;
   DOM.statusLog.appendChild(bubble);
 
-  // 限制消息数量，最多保留20条
   while (DOM.statusLog.children.length > 20) {
     DOM.statusLog.removeChild(DOM.statusLog.firstChild);
   }
 
-  // 自动滚动到底部
   setTimeout(() => {
     if (DOM.statusLog) {
       DOM.statusLog.scrollTop = DOM.statusLog.scrollHeight;
@@ -181,7 +220,6 @@ function addStatusMessage(text) {
   }, 50);
 }
 
-// -------------------- 桌面预览布局 --------------------
 function ensureSeat(id) {
   if (!DOM.tablePlayers) return null;
   
@@ -195,7 +233,6 @@ function ensureSeat(id) {
   const src = isHuman ? `${CONFIG.portraitsBase}portrait_human.png` : `${CONFIG.portraitsBase}portrait_${id}.png`;
   const alt = isHuman ? "Human" : `Agent ${id}`;
   
-  // 获取模型信息
   const AgentConfigs = loadAgentConfigs();
   const cfg = AgentConfigs[id] || {};
   const baseModel = cfg.base_model || "";
@@ -209,7 +246,7 @@ function ensureSeat(id) {
   seat.style.left = "50%";
   seat.style.top = "50%";
   seat.style.transform = "translate(-50%, -50%) scale(0.8)";
-  seat.style.pointerEvents = "auto"; // 确保可以接收事件
+  seat.style.pointerEvents = "auto";
   seat.style.cursor = isHuman ? "default" : "pointer";
   DOM.tablePlayers.appendChild(seat);
   
@@ -217,11 +254,9 @@ function ensureSeat(id) {
   return seat;
 }
 
-// 检查角色冲突 - 简化版本：检查每个角色/势力是否只出现一次
 function checkRoleConflict(seatId, newRole, game) {
   if (!game) return null;
   
-  // 获取所有座位的当前选择
   const seats = DOM.tablePlayers.querySelectorAll(".seat");
   const currentSelections = [];
   
@@ -229,7 +264,6 @@ function checkRoleConflict(seatId, newRole, game) {
     const select = seat.querySelector(".seat-label select");
     if (!select) return;
     let value = select.value;
-    // 如果是当前修改的座位，使用新值
     if (seat.dataset.id === seatId) {
       value = newRole;
     }
@@ -238,13 +272,14 @@ function checkRoleConflict(seatId, newRole, game) {
     }
   });
   
-  // 获取应该有的角色/势力列表
   let expectedList = [];
   if (game === "avalon") {
-    // 5人局：固定角色列表
-    expectedList = ["Merlin", "Percival", "Servant", "Minion", "Assassin"];
+    if (state.avalonOptions && Array.isArray(state.avalonOptions.roles)) {
+      expectedList = state.avalonOptions.roles.slice();
+    } else {
+      expectedList = ["Merlin", "Servant", "Servant", "Minion", "Assassin"];
+    }
   } else if (game === "diplomacy") {
-    // 7人局：从后端获取power names
     if (state.diplomacyOptions && Array.isArray(state.diplomacyOptions.powers)) {
       expectedList = state.diplomacyOptions.powers.slice();
     }
@@ -252,13 +287,11 @@ function checkRoleConflict(seatId, newRole, game) {
   
   if (expectedList.length === 0) return null;
   
-  // 检查每个元素是否只出现一次
   const counts = {};
   currentSelections.forEach(role => {
     counts[role] = (counts[role] || 0) + 1;
   });
   
-  // 检查是否有重复
   for (const [role, count] of Object.entries(counts)) {
     if (count > 1) {
       return {
@@ -269,7 +302,6 @@ function checkRoleConflict(seatId, newRole, game) {
     }
   }
   
-  // 检查是否所有必需的角色/势力都存在
   const missing = expectedList.filter(role => !currentSelections.includes(role));
   if (missing.length > 0) {
     return {
@@ -279,7 +311,7 @@ function checkRoleConflict(seatId, newRole, game) {
     };
   }
   
-  return null; // 无冲突
+  return null;
 }
 
 function setSeatLabelBySeatId(seatId, text, options = []) {
@@ -294,10 +326,10 @@ function setSeatLabelBySeatId(seatId, text, options = []) {
     return;
   }
   
-  // 如果是下拉框模式
+
   if (options.length > 0) {
     const select = document.createElement("select");
-    let currentValue = text || options[0]; // 当前值
+    let currentValue = text || options[0];
     options.forEach(opt => {
       const option = document.createElement("option");
       option.value = opt;
@@ -308,7 +340,6 @@ function setSeatLabelBySeatId(seatId, text, options = []) {
       select.appendChild(option);
     });
     
-    // 阻止下拉框的点击事件冒泡到seat
     select.addEventListener("click", (e) => {
       e.stopPropagation();
     });
@@ -317,28 +348,23 @@ function setSeatLabelBySeatId(seatId, text, options = []) {
       e.stopPropagation();
     });
     
-    // 添加change事件监听
     select.addEventListener("change", (e) => {
       e.stopPropagation();
       const newRole = e.target.value;
       const game = state.selectedGame;
       
-      // 检查冲突（只提醒，不阻止）
       const conflict = checkRoleConflict(seatId, newRole, game);
       if (conflict && conflict.hasConflict) {
         addStatusMessage(`⚠ ${conflict.message}`);
       }
       
-      // 更新当前值（允许冲突）
       currentValue = newRole;
       
-      // 更新状态
       if (game === "avalon") {
         const ids = state.selectedIdsOrder.filter(id => state.selectedIds.has(id));
         const idx = ids.indexOf(parseInt(seatId, 10));
         if (idx !== -1 && state.avalonRoleOrder) {
           state.avalonRoleOrder[idx] = newRole;
-          // 更新预览结果
           state.avalonPreviewRoles = state.avalonRoleOrder.map((roleName, i) => ({
             role_id: AVALON_ROLE_MAP[roleName] || 0,
             role_name: roleName,
@@ -354,10 +380,8 @@ function setSeatLabelBySeatId(seatId, text, options = []) {
         }
       }
       
-      // 更新配置检查提示
       updateSelectionHint();
       
-      // 更新围桌中心角色统计显示
       updateTableRoleStats();
       
       addStatusMessage(`Updated role: ${newRole}`);
@@ -367,13 +391,11 @@ function setSeatLabelBySeatId(seatId, text, options = []) {
     labelContainer.appendChild(select);
     el.classList.add("has-label");
   } else {
-    // 文本模式（向后兼容）
     labelContainer.textContent = String(text);
   el.classList.add("has-label");
   }
 }
 
-// 参与模式：不显示预览 & random 强制置灰
 function shouldShowPreview() {
   return state.selectedMode !== "participate";
 }
@@ -389,24 +411,24 @@ function setRandomButtonsEnabled() {
 function requiredCountForPreview() {
   const game = state.selectedGame;
   if (!game) return 0;
-  if (game === "avalon") return 5;      // 仅观战预览 5 人
-  if (game === "diplomacy") return 7;   // 仅观战预览 7 人
+  if (game === "avalon") return 5;
+  if (game === "diplomacy") return 7;
   return 0;
 }
 
-// Avalon(5人) 前端复刻 roles assign
 function avalonAssignRolesFor5() {
-  // 固定 5 人：2 evil(Assassin+Minion) + 3 good(Merlin+Percival+Servant)
-  // role 名称直接用于 UI 展示
-  const roles = ["Merlin", "Percival", "Servant", "Minion", "Assassin"];
-  // 洗牌
+  if (state.avalonOptions && Array.isArray(state.avalonOptions.roles)) {
+    const roles = state.avalonOptions.roles.slice();
+    return shuffleInPlace(roles);
+  }
+  
+  const roles = ["Merlin", "Servant", "Servant", "Minion", "Assassin"];
   return shuffleInPlace(roles.slice());
 }
 
 function updateTableHeadPreview() {
   if (!DOM.tablePlayers) return;
 
-  // 先清空所有 label
   Array.from(DOM.tablePlayers.querySelectorAll(".seat")).forEach(seat => {
     const label = seat.querySelector(".seat-label");
     if (label) label.innerHTML = "";
@@ -419,68 +441,62 @@ function updateTableHeadPreview() {
   const ids = state.selectedIdsOrder.filter(id => state.selectedIds.has(id));
   const isParticipate = state.selectedMode === "participate";
   
-  // 检查人数是否正确
   if (game === "avalon") {
     const numPlayersEl = document.getElementById("avalon-num-players");
     const numPlayers = numPlayersEl ? parseInt(numPlayersEl.value, 10) : 5;
     const required = isParticipate ? (numPlayers - 1) : numPlayers;
     if (ids.length !== required) {
-      updateSelectionHint(); // 更新配置检查
+      updateSelectionHint();
       return;
     }
   } else if (game === "diplomacy") {
     const required = isParticipate ? 6 : 7;
     if (ids.length !== required) {
-      updateSelectionHint(); // 更新配置检查
+      updateSelectionHint();
       return;
     }
   }
 
-  // 分配角色/势力（participate 模式下也分配，只是不显示预览）
   if (game === "avalon") {
     const numPlayersEl = document.getElementById("avalon-num-players");
     const numPlayers = numPlayersEl ? parseInt(numPlayersEl.value, 10) : 5;
     if (!state.avalonRoleOrder || state.avalonRoleOrder.length !== numPlayers) {
-      // 根据人数分配角色（目前只支持5人局）
       if (numPlayers === 5) {
       state.avalonRoleOrder = avalonAssignRolesFor5();
       } else {
-        // 其他人数暂时不支持，使用默认值
         state.avalonRoleOrder = Array(numPlayers).fill("Servant");
       }
     }
-    // 存储预览结果，用于下发给后端
     state.avalonPreviewRoles = state.avalonRoleOrder.map((roleName, idx) => ({
       role_id: AVALON_ROLE_MAP[roleName] || 0,
       role_name: roleName,
       is_good: AVALON_GOOD_ROLES.includes(roleName),
     }));
     
-    // 只有在 observe 模式下才显示下拉框
     if (shouldShowPreview()) {
-      // 所有可用的角色选项（目前只支持5人局）
-      const allRoles = numPlayers === 5 
-        ? ["Merlin", "Percival", "Servant", "Minion", "Assassin"]
-        : ["Servant"]; // 其他人数暂时只支持Servant
-      // 为每个 portrait id 设置下拉框
-    ids.forEach((portraitId, idx) => {
+      let allRoles = [];
+      if (state.avalonOptions && Array.isArray(state.avalonOptions.roles)) {
+        allRoles = [...new Set(state.avalonOptions.roles)];
+      } else {
+        allRoles = numPlayers === 5 
+          ? ["Merlin", "Servant", "Minion", "Assassin"]
+          : ["Servant"];
+      }
+      ids.forEach((portraitId, idx) => {
         setSeatLabelBySeatId(String(portraitId), state.avalonRoleOrder[idx], allRoles);
-    });
+      });
     }
   } else if (game === "diplomacy") {
     const powers = (state.diplomacyPowerOrder && state.diplomacyPowerOrder.length === 7)
       ? state.diplomacyPowerOrder
       : (state.diplomacyOptions && Array.isArray(state.diplomacyOptions.powers) ? state.diplomacyOptions.powers.slice() : []);
     if (powers.length !== 7) {
-      updateSelectionHint(); // 更新配置检查
+      updateSelectionHint();
       return;
     }
-    // 存储预览结果，用于下发给后端
     state.diplomacyPreviewPowers = powers.slice();
     
-    // 只有在 observe 模式下才显示下拉框
     if (shouldShowPreview()) {
-      // 为每个 portrait id 设置下拉框（Diplomacy暂时还是文本，因为powers是动态的）
     ids.forEach((portraitId, idx) => {
         const allPowers = state.diplomacyOptions && Array.isArray(state.diplomacyOptions.powers) 
           ? state.diplomacyOptions.powers.slice() 
@@ -490,14 +506,11 @@ function updateTableHeadPreview() {
     }
   }
   
-  // 更新配置检查提示
   updateSelectionHint();
   
-  // 更新围桌中心角色统计显示（仅在observe模式下）
   updateTableRoleStats();
 }
 
-// 更新围桌中心角色统计显示
 function updateTableRoleStats() {
   const statsEl = document.getElementById("table-role-stats");
   if (!statsEl) return;
@@ -508,7 +521,6 @@ function updateTableRoleStats() {
     return;
   }
   
-  // 检查人数是否满足要求
   const mode = state.selectedMode;
   const selected = state.selectedIds.size;
   let required = 0;
@@ -520,20 +532,17 @@ function updateTableRoleStats() {
     required = (mode === "participate") ? 6 : 7;
   }
   
-  // 当且仅当满足人数时显示
   if (selected !== required) {
     statsEl.classList.remove("show");
     return;
   }
   
-  // 获取当前选择的角色
   let currentSelections = [];
   if (game === "avalon" && state.avalonRoleOrder && Array.isArray(state.avalonRoleOrder)) {
     currentSelections = state.avalonRoleOrder.slice();
   } else if (game === "diplomacy" && state.diplomacyPowerOrder && Array.isArray(state.diplomacyPowerOrder)) {
     currentSelections = state.diplomacyPowerOrder.slice();
   } else {
-    // 从下拉框中获取（observe模式）
     const seats = DOM.tablePlayers ? DOM.tablePlayers.querySelectorAll(".seat") : [];
     seats.forEach(seat => {
       const select = seat.querySelector(".seat-label select");
@@ -548,25 +557,35 @@ function updateTableRoleStats() {
     return;
   }
   
-  // 统计每个角色/势力的数量
   const counts = {};
   currentSelections.forEach(role => {
     counts[role] = (counts[role] || 0) + 1;
   });
   
-  // 获取应该有的角色/势力列表和期望数量
-  let roleConfig = [];
-  if (game === "avalon") {
-    const numPlayersEl = document.getElementById("avalon-num-players");
-    const numPlayers = numPlayersEl ? parseInt(numPlayersEl.value, 10) : 5;
-    if (numPlayers === 5) {
-      roleConfig = [
-        { name: "Merlin", expected: 1 },
-        { name: "Percival", expected: 1 },
-        { name: "Servant", expected: 1 },
-        { name: "Minion", expected: 1 },
-        { name: "Assassin", expected: 1 }
-      ];
+let roleConfig = [];
+if (game === "avalon") {
+  const numPlayersEl = document.getElementById("avalon-num-players");
+  const numPlayers = numPlayersEl ? parseInt(numPlayersEl.value, 10) : 5;
+  
+  if (state.avalonOptions && Array.isArray(state.avalonOptions.roles)) {
+      const roles = state.avalonOptions.roles;
+      const roleCounts = {};
+      roles.forEach(role => {
+        roleCounts[role] = (roleCounts[role] || 0) + 1;
+      });
+      roleConfig = Object.entries(roleCounts).map(([name, expected]) => ({
+        name,
+        expected
+      }));
+    } else {
+      if (numPlayers === 5) {
+        roleConfig = [
+          { name: "Merlin", expected: 1 },
+          { name: "Servant", expected: 2 },
+          { name: "Minion", expected: 1 },
+          { name: "Assassin", expected: 1 }
+        ];
+      }
     }
   } else if (game === "diplomacy") {
     if (state.diplomacyOptions && Array.isArray(state.diplomacyOptions.powers)) {
@@ -582,7 +601,6 @@ function updateTableRoleStats() {
     return;
   }
   
-  // 生成统计HTML
   statsEl.innerHTML = "";
   roleConfig.forEach(role => {
     const current = counts[role.name] || 0;
@@ -592,7 +610,6 @@ function updateTableRoleStats() {
       <span class="role-name">${role.name}:</span>
       <span class="role-count">${current}/${role.expected}</span>
     `;
-    // 如果数量不匹配，使用警告颜色
     if (current !== role.expected) {
       item.querySelector(".role-count").style.color = "#ff6b6b";
     }
@@ -605,11 +622,9 @@ function updateTableRoleStats() {
 function layoutTablePlayers() {
   if (!DOM.tablePlayers) return;
   
-  // 使用有序数组而不是Set
   const ids = state.selectedIdsOrder.filter(id => state.selectedIds.has(id));
   const wantHuman = state.selectedMode === "participate";
   
-  // 在 participate 模式下，根据 user_agent_id 决定 human 的位置
   let keys = [];
   if (wantHuman) {
     const game = state.selectedGame;
@@ -619,7 +634,6 @@ function layoutTablePlayers() {
       const userAgentEl = document.getElementById("avalon-user-agent-id");
       userAgentId = userAgentEl ? parseInt(userAgentEl.value, 10) : 0;
     } else if (game === "diplomacy") {
-      // Diplomacy 使用 power 名称，需要转换为索引
       const hpEl = document.getElementById("diplomacy-human-power");
       const humanPower = hpEl ? hpEl.value : "";
       if (state.diplomacyOptions && state.diplomacyOptions.powers) {
@@ -628,28 +642,24 @@ function layoutTablePlayers() {
       }
     }
     
-    // 按游戏中的实际顺序构建 keys
     const totalPlayers = ids.length + 1;  // AI + human
     keys = [];
     for (let i = 0; i < totalPlayers; i++) {
       if (i === userAgentId) {
         keys.push("human");
       } else {
-        // AI 玩家的索引：如果在 human 之前，直接用 i；如果在 human 之后，用 i-1
         const aiIndex = i < userAgentId ? i : (i - 1);
         if (aiIndex < ids.length) {
           keys.push(String(ids[aiIndex]));
         }
       }
     }
-  } else {
-    // observe 模式：只有 AI 玩家
+  } else {  
     keys = ids.map((x) => String(x));
   }
   
   const keySet = new Set(keys);
   
-  // 移除未选中的座位
   Array.from(DOM.tablePlayers.querySelectorAll(".seat")).forEach(el => {
     const key = String(el.dataset.id || "");
     if (!keySet.has(key)) {
@@ -660,10 +670,8 @@ function layoutTablePlayers() {
   
   if (!keys.length) return;
   
-  // 确保所有座位存在
   keys.forEach(id => ensureSeat(id));
   
-  // 布局计算
   const rect = DOM.tablePlayers.getBoundingClientRect();
   const cx = rect.width / 2;
   const cy = rect.height / 2;
@@ -672,26 +680,21 @@ function layoutTablePlayers() {
   const radiusY = Math.min(125, Math.max(90, rect.height * 0.35));
   const positions = polarPositions(keys.length, radiusX, radiusY);
   
-  // 应用位置和事件
   keys.forEach((id, i) => {
     const el = DOM.tablePlayers.querySelector(`.seat[data-id="${id}"]`);
     if (!el) return;
     
-    // 应用位置和样式
     el.style.left = `${cx + positions[i].x - seatSize / 2}px`;
     el.style.top = `${cy + positions[i].y - seatSize / 2}px`;
     el.style.transform = `rotate(${(i % 2 ? 1 : -1) * 2}deg)`;
     el.style.zIndex = "1";
     el.style.cursor = id === "human" ? "default" : "pointer";
-    el.style.pointerEvents = "auto"; // 确保可以点击
+    el.style.pointerEvents = "auto";
     
-    // 只在元素还没有事件监听器标记时添加事件（通过检查 data-has-events 属性）
     if (id !== "human" && !el.dataset.hasEvents) {
       el.dataset.hasEvents = "true";
       
-      // 点击取消选中（但排除下拉框区域）
       el.addEventListener("click", (e) => {
-        // 如果点击的是下拉框或其子元素，不触发取消选中
         if (e.target.closest(".seat-label") || e.target.closest("select")) {
           return;
         }
@@ -699,7 +702,6 @@ function layoutTablePlayers() {
         e.preventDefault();
         const portraitId = parseInt(id, 10);
         if (!isNaN(portraitId)) {
-          // 从上方人物列表中获取正确的名称，保持格式一致
           const portraitCard = DOM.strip?.querySelector(`.portrait-card[data-id="${portraitId}"]`);
           let agentName = `Agent ${portraitId}`;
           if (portraitCard) {
@@ -714,11 +716,9 @@ function layoutTablePlayers() {
     }
   });
 
-  // 更新头顶预览（依赖 seat 已存在且定位完成）
   updateTableHeadPreview();
 }
 
-// -------------------- 人物选择 --------------------
 function updateCounter() {
   if (DOM.counterEl) {
     const game = state.selectedGame;
@@ -727,7 +727,6 @@ function updateCounter() {
     let required = 0;
     
     if (game === 'avalon') {
-      // 获取当前选择的人数，如果没有选择则使用默认值5
       const numPlayersEl = document.getElementById("avalon-num-players");
       const numPlayers = numPlayersEl ? parseInt(numPlayersEl.value, 10) : 5;
       required = (mode === 'participate') ? (numPlayers - 1) : numPlayers;
@@ -738,16 +737,14 @@ function updateCounter() {
     DOM.counterEl.textContent = `${selected}/${required}`;
   }
   updateSelectionHint();
-  updateTableRoleStats(); // 人数变化时立即更新角色统计
+  updateTableRoleStats();
 }
 
-// 检查配置错误（包括人数和身份配置）
 function checkConfigError() {
   const game = state.selectedGame;
   const mode = state.selectedMode;
   const selected = state.selectedIds.size;
   
-  // 检查人数
   let required = 0;
   if (game === 'avalon') {
     const numPlayersEl = document.getElementById("avalon-num-players");
@@ -764,14 +761,11 @@ function checkConfigError() {
     };
   }
   
-  // 检查身份配置（只有在人数正确时才检查）
   const currentMode = state.selectedMode;
   const isParticipate = currentMode === "participate";
   
   let currentSelections = [];
   
-  // 在participate模式下，从状态中获取角色信息（不显示预览但已分配）
-  // 在observe模式下，从下拉框中获取角色信息
   if (isParticipate) {
     if (game === "avalon" && state.avalonRoleOrder && Array.isArray(state.avalonRoleOrder)) {
       currentSelections = state.avalonRoleOrder.slice();
@@ -779,7 +773,6 @@ function checkConfigError() {
       currentSelections = state.diplomacyPowerOrder.slice();
     }
   } else {
-    // observe模式：从下拉框中获取
     if (!DOM.tablePlayers) return null;
     
     const seats = DOM.tablePlayers.querySelectorAll(".seat");
@@ -793,14 +786,15 @@ function checkConfigError() {
     });
   }
   
-  // 获取应该有的角色/势力列表
   let expectedList = [];
   if (game === "avalon") {
     const numPlayersEl = document.getElementById("avalon-num-players");
     const numPlayers = numPlayersEl ? parseInt(numPlayersEl.value, 10) : 5;
-    // 根据人数确定角色列表（目前只支持5人局）
-    if (numPlayers === 5) {
-      expectedList = ["Merlin", "Percival", "Servant", "Minion", "Assassin"];
+    
+    if (state.avalonOptions && Array.isArray(state.avalonOptions.roles)) {
+      expectedList = state.avalonOptions.roles.slice();
+    } else {
+      expectedList = ["Merlin", "Servant", "Servant", "Minion", "Assassin"];
     }
   } else if (game === "diplomacy") {
     if (state.diplomacyOptions && Array.isArray(state.diplomacyOptions.powers)) {
@@ -810,18 +804,58 @@ function checkConfigError() {
   
   if (expectedList.length === 0) return null;
   
-  // 如果还没有分配角色（participate模式下可能还没调用updateTableHeadPreview），不报错
   if (currentSelections.length === 0) return null;
   
-  // 检查每个元素是否只出现一次
-  const counts = {};
+  const currentCounts = {};
   currentSelections.forEach(role => {
-    counts[role] = (counts[role] || 0) + 1;
+    currentCounts[role] = (currentCounts[role] || 0) + 1;
   });
   
-  // 检查是否有重复
-  for (const [role, count] of Object.entries(counts)) {
-    if (count > 1) {
+  const expectedCounts = {};
+  expectedList.forEach(role => {
+    expectedCounts[role] = (expectedCounts[role] || 0) + 1;
+  });
+  
+  if (game === "avalon") {
+    for (const role of Object.keys(currentCounts)) {
+      if (!(role in expectedCounts)) {
+        return {
+          hasError: true,
+          message: `Config Error`
+        };
+      }
+    }
+    
+    for (const role of Object.keys(expectedCounts)) {
+      const currentCount = currentCounts[role] || 0;
+      const expectedCount = expectedCounts[role];
+      if (currentCount !== expectedCount) {
+        return {
+          hasError: true,
+          message: `Config Error`
+        };
+      }
+    }
+  } else if (game === "diplomacy") {
+    for (const [role, count] of Object.entries(currentCounts)) {
+      if (count > 1) {
+        return {
+          hasError: true,
+          message: `Config Error`
+        };
+      }
+    }
+    
+    const missing = expectedList.filter(role => !currentSelections.includes(role));
+    if (missing.length > 0) {
+      return {
+        hasError: true,
+        message: `Config Error`
+      };
+    }
+    
+    const extra = currentSelections.filter(role => !expectedList.includes(role));
+    if (extra.length > 0) {
       return {
         hasError: true,
         message: `Config Error`
@@ -829,25 +863,7 @@ function checkConfigError() {
     }
   }
   
-  // 检查是否所有必需的角色/势力都存在
-  const missing = expectedList.filter(role => !currentSelections.includes(role));
-  if (missing.length > 0) {
-    return {
-      hasError: true,
-      message: `Config Error`
-    };
-  }
-  
-  // 检查是否有额外的角色/势力
-  const extra = currentSelections.filter(role => !expectedList.includes(role));
-  if (extra.length > 0) {
-    return {
-      hasError: true,
-      message: `Config Error`
-    };
-  }
-  
-  return null; // 无错误
+  return null;
 }
 
 function updateSelectionHint() {
@@ -874,25 +890,20 @@ function updateSelectionHint() {
   }
   
   if (showHint) {
-    // 先检查配置错误（包括人数和身份配置）
     const configError = checkConfigError();
     
     if (configError && configError.hasError) {
-      // 如果有配置错误，显示错误信息
       hint = configError.message;
-      hintPill.style.borderColor = '#ff6b6b'; // 红色表示错误
+      hintPill.style.borderColor = '#ff6b6b';
     } else if (selected < required) {
-      // 人数不足
       hint = `${required - selected} more`;
-      hintPill.style.borderColor = '#ffdd57'; // 黄色表示警告
+      hintPill.style.borderColor = '#ffdd57';
     } else if (selected === required) {
-      // 人数正确且配置正确
       hint = `✓ Correct`;
-      hintPill.style.borderColor = '#51f6a5'; // 绿色表示正确
+      hintPill.style.borderColor = '#51f6a5';
     } else {
-      // 人数超出
       hint = `⚠ Exceed ${selected - required}`;
-      hintPill.style.borderColor = '#ff6b6b'; // 红色表示错误
+      hintPill.style.borderColor = '#ff6b6b';
   }
   
     hintEl.textContent = hint;
@@ -903,7 +914,6 @@ function updateSelectionHint() {
 }
 
 function updatePortraitCardActiveState(portraitId, isActive) {
-  // 更新上方人物列表中对应卡片的 active 状态
   if (!DOM.strip) return;
   const card = DOM.strip.querySelector(`.portrait-card[data-id="${portraitId}"]`);
   if (card) {
@@ -920,12 +930,10 @@ function toggleAgent(person, card) {
   
   if (existed) {
     state.selectedIds.delete(person.id);
-    // 从有序数组中移除
     const idx = state.selectedIdsOrder.indexOf(person.id);
     if (idx !== -1) {
       state.selectedIdsOrder.splice(idx, 1);
     }
-    // 更新上方人物列表的 active 状态（即使 card 为 null 也要更新）
     if (card) {
       card.classList.remove("active");
     } else {
@@ -938,11 +946,9 @@ function toggleAgent(person, card) {
   }
   
   state.selectedIds.add(person.id);
-  // 添加到有序数组末尾
   if (!state.selectedIdsOrder.includes(person.id)) {
     state.selectedIdsOrder.push(person.id);
   }
-  // 更新上方人物列表的 active 状态（即使 card 为 null 也要更新）
   if (card) {
     card.classList.add("active");
   } else {
@@ -956,7 +962,6 @@ function toggleAgent(person, card) {
 function renderPortraits() {
   if (!DOM.portraitsGrid) return;
   
-  // 先清空现有内容，避免重复渲染
   DOM.portraitsGrid.innerHTML = "";
   
   const AgentConfigs = loadAgentConfigs();
@@ -975,13 +980,11 @@ function renderPortraits() {
   portraits.forEach(p => {
     const card = document.createElement("div");
     card.className = "portrait-card";
-    // 如果这个角色已经被选中，添加 active 类
     if (state.selectedIds.has(p.id)) {
       card.classList.add("active");
     }
     card.dataset.id = String(p.id);
     
-    // 构建基座模型标签（如果有的话）
     const modelLabel = p.base_model 
       ? `<div class="portrait-model">${p.base_model}</div>` 
       : "";
@@ -996,7 +999,6 @@ function renderPortraits() {
   });
 }
 
-// -------------------- 游戏/模式选择 --------------------
 function focusGame(game) {
   if (!DOM.gameCards) return;
   DOM.gameCards.forEach(c => c.classList.toggle("active", c.dataset.game === game));
@@ -1009,9 +1011,8 @@ function setGame(game) {
   if (!state.selectedGame) {
     if (DOM.avalonFields) DOM.avalonFields.classList.remove("show");
     if (DOM.diplomacyFields) DOM.diplomacyFields.classList.remove("show");
-    updateCounter(); // 更新计数（显示0/0）
-    updateTableRoleStats(); // 没有选择游戏时隐藏统计
-    // 隐藏围桌和start按钮
+    updateCounter();
+    updateTableRoleStats();
     const tablePreview = document.getElementById("table-preview");
     if (tablePreview) {
       tablePreview.classList.remove("has-game");
@@ -1021,40 +1022,36 @@ function setGame(game) {
   
   addStatusMessage(`Selected game: ${state.selectedGame}`);
   
-  // 选择游戏后，从 localStorage 加载或从后端获取游戏配置
   if (state.selectedGame === "diplomacy") {
-    // 检查是否需要刷新配置（如果上次选择的游戏不同，则刷新）
     const lastGame = localStorage.getItem(STORAGE_KEYS.LAST_GAME_OPTIONS);
     const forceRefresh = lastGame !== "diplomacy";
     if (forceRefresh) {
       localStorage.setItem(STORAGE_KEYS.LAST_GAME_OPTIONS, "diplomacy");
     }
     fetchDiplomacyOptions(forceRefresh).then(() => {
-      updateCounter(); // 获取配置后更新计数
+      updateCounter();
     });
   } else if (state.selectedGame === "avalon") {
-    // Avalon 配置处理（如果需要的话）
     const lastGame = localStorage.getItem(STORAGE_KEYS.LAST_GAME_OPTIONS);
     const forceRefresh = lastGame !== "avalon";
     if (forceRefresh) {
       localStorage.setItem(STORAGE_KEYS.LAST_GAME_OPTIONS, "avalon");
-      // 可以在这里加载 avalon 配置
+      fetchAvalonOptions(forceRefresh).then(() => {
+        updateCounter();
+      });
     }
-    updateCounter(); // 选择avalon后立即更新计数（显示0/5）
+    updateCounter();
   }
   
   updateConfigVisibility();
   updateSelectionHint();
   updateTableHeadPreview();
-  updateTableRoleStats(); // 切换游戏时立即刷新角色统计
+  updateTableRoleStats();
   
-  // 显示/隐藏围桌和start按钮
   const tablePreview = document.getElementById("table-preview");
   if (tablePreview) {
     if (state.selectedGame) {
       tablePreview.classList.add("has-game");
-      // 显示围桌后，需要重新布局以确保位置正确
-      // 使用 setTimeout 确保 DOM 更新完成后再计算位置
       setTimeout(() => {
         layoutTablePlayers();
       }, 0);
@@ -1067,12 +1064,10 @@ function setGame(game) {
 function setMode(mode) {
   state.selectedMode = mode || "observe";
   
-  // 更新 label 显示
   if (DOM.modeLabelEl) {
     DOM.modeLabelEl.textContent = state.selectedMode === "observe" ? "Observer" : "Participate";
   }
   
-  // 更新 mode-opt 按钮的 active 状态
   if (DOM.modeToggle) {
     DOM.modeToggle.querySelectorAll(".mode-opt").forEach(opt => {
       opt.classList.toggle("active", opt.dataset.mode === state.selectedMode);
@@ -1080,11 +1075,10 @@ function setMode(mode) {
   }
   
   updateConfigVisibility();
-  updateSelectionHint(); // 模式改变时更新提示
-  layoutTablePlayers(); // 重新布局以显示/隐藏人类头像
-  // 参与模式需要强制隐藏预览并禁用 random
+  updateSelectionHint();
+  layoutTablePlayers();
   updateTableHeadPreview();
-  updateTableRoleStats(); // 切换模式时立即刷新角色统计
+  updateTableRoleStats();
 }
 
 function updateConfigVisibility() {
@@ -1119,7 +1113,44 @@ function shuffleInPlace(arr) {
   return arr;
 }
 
-// -------------------- Diplomacy 配置 --------------------
+async function fetchAvalonOptions(forceRefresh = false) {
+  try {
+    if (window.location.protocol === "file:") {
+      state.avalonOptions = null;
+      updateConfigVisibility();
+      return;
+    }
+    
+    const cachedOptions = loadGameOptions();
+    if (!forceRefresh && cachedOptions.avalon) {
+      state.avalonOptions = cachedOptions.avalon;
+    } else {
+      const resp = await fetch("/api/options?game=avalon");
+      if (!resp.ok) throw new Error("Failed to fetch options");
+      state.avalonOptions = await resp.json();
+      
+      const gameOptions = loadGameOptions();
+      gameOptions.avalon = state.avalonOptions;
+      saveGameOptions(gameOptions);
+    }
+    
+    if (state.avalonOptions.defaults) {
+      const numPlayersEl = document.getElementById("avalon-num-players");
+      const langEl = document.getElementById("avalon-language");
+      
+      if (numPlayersEl) numPlayersEl.value = state.avalonOptions.defaults.num_players;
+      if (langEl) langEl.value = state.avalonOptions.defaults.language;
+    }
+    
+    updateConfigVisibility();
+    updateTableHeadPreview();
+  } catch (e) {
+    console.error("Failed to fetch avalon options:", e);
+    state.avalonOptions = null;
+    updateConfigVisibility();
+  }
+}
+
 async function fetchDiplomacyOptions(forceRefresh = false) {
   try {
     if (window.location.protocol === "file:") {
@@ -1128,25 +1159,21 @@ async function fetchDiplomacyOptions(forceRefresh = false) {
       return;
     }
     
-    // 先尝试从 localStorage 读取
     const cachedOptions = loadGameOptions();
     if (!forceRefresh && cachedOptions.diplomacy) {
       state.diplomacyOptions = cachedOptions.diplomacy;
       state.diplomacyPowerOrder = Array.isArray(state.diplomacyOptions.powers) ? state.diplomacyOptions.powers.slice() : null;
     } else {
-      // 从后端获取
       const resp = await fetch("/api/options?game=diplomacy");
       if (!resp.ok) throw new Error("Failed to fetch options");
       state.diplomacyOptions = await resp.json();
       state.diplomacyPowerOrder = Array.isArray(state.diplomacyOptions.powers) ? state.diplomacyOptions.powers.slice() : null;
       
-      // 保存到 localStorage
       const gameOptions = loadGameOptions();
       gameOptions.diplomacy = state.diplomacyOptions;
       saveGameOptions(gameOptions);
     }
     
-    // 填充 human power 下拉
     const hpSelect = document.getElementById("diplomacy-human-power");
     if (hpSelect && state.diplomacyOptions.powers) {
       hpSelect.innerHTML = "";
@@ -1158,7 +1185,6 @@ async function fetchDiplomacyOptions(forceRefresh = false) {
       });
     }
     
-    // 设置默认值
     if (state.diplomacyOptions.defaults) {
       const maxPhasesEl = document.getElementById("diplomacy-max-phases");
       const negRoundsEl = document.getElementById("diplomacy-negotiation-rounds");
@@ -1178,7 +1204,6 @@ async function fetchDiplomacyOptions(forceRefresh = false) {
   }
 }
 
-// -------------------- 游戏启动 --------------------
 function buildPayload(game, mode) {
   const payload = { game, mode };
   
@@ -1193,15 +1218,12 @@ function buildPayload(game, mode) {
       payload.user_agent_id = parseInt(userAgentEl.value, 10);
     }
     
-    // 下发预览的 preset_roles（如果有）
     if (state.avalonPreviewRoles && state.avalonPreviewRoles.length > 0) {
       payload.preset_roles = state.avalonPreviewRoles;
     }
     
-    // 下发选择的 portrait ids（保持顺序）
     payload.selected_portrait_ids = state.selectedIdsOrder.filter(id => state.selectedIds.has(id));
     
-    // 读取并传递 agent 配置（从 localStorage）
     const agentConfigs = loadAgentConfigs();
     const agent_configs = {};
     payload.selected_portrait_ids.forEach(portraitId => {
@@ -1233,22 +1255,16 @@ function buildPayload(game, mode) {
       payload.human_power = hpEl.value;
     }
     
-    // 下发打乱的 power_names（如果有预览结果就用预览，否则用默认顺序）
     if (state.diplomacyPreviewPowers && state.diplomacyPreviewPowers.length > 0) {
       payload.power_names = state.diplomacyPreviewPowers;
     } else if (state.diplomacyOptions && state.diplomacyOptions.powers && state.diplomacyOptions.powers.length === 7) {
-      // participate 模式下可能没有预览，使用默认顺序
       payload.power_names = state.diplomacyOptions.powers.slice();
     }
     
-    // 读取并传递 agent 配置（从 localStorage）
-    // Diplomacy 需要根据 power_names 的顺序映射到 selected_portrait_ids
     const agentConfigs = loadAgentConfigs();
     const agent_configs = {};
     const ids = state.selectedIdsOrder.filter(id => state.selectedIds.has(id));
     
-    // 构建完整的 selected_portrait_ids 数组，长度与 power_names 一致
-    // 在 participate 模式下，human player 位置插入 -1 作为占位符
     let fullPortraitIds = [];
     if (payload.power_names && payload.power_names.length > 0) {
         if (mode === "participate" && payload.human_power) {
@@ -1303,16 +1319,13 @@ function buildPayload(game, mode) {
   return payload;
 }
 
-// -------------------- 下拉菜单控制 --------------------
 function closeModeDropdown() {
   if (DOM.modeToggle) {
     DOM.modeToggle.classList.remove("open");
   }
 }
 
-// -------------------- 事件监听器 --------------------
 function initEventListeners() {
-  // 游戏卡片点击选择游戏
   if (DOM.gameCards) {
     DOM.gameCards.forEach(card => {
       card.addEventListener("click", () => {
@@ -1321,7 +1334,6 @@ function initEventListeners() {
     });
   }
   
-  // Mode 下拉按钮（打开/关闭菜单）
   if (DOM.modeToggle) {
     const pill = DOM.modeToggle.querySelector(".pill-mode");
     if (pill) {
@@ -1331,7 +1343,6 @@ function initEventListeners() {
       });
     }
     
-    // Mode 选项点击
     DOM.modeToggle.querySelectorAll(".mode-opt").forEach(opt => {
       opt.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -1342,10 +1353,8 @@ function initEventListeners() {
     });
   }
   
-  // 点击页面其他地方关闭下拉
   document.addEventListener("click", () => closeModeDropdown());
   
-  // Avalon 人数变化时更新玩家 ID 选项
   const avalonNumPlayers = document.getElementById("avalon-num-players");
   if (avalonNumPlayers) {
     avalonNumPlayers.addEventListener("change", function() {
@@ -1360,14 +1369,12 @@ function initEventListeners() {
           userAgentSelect.appendChild(opt);
         }
       }
-      // 目前 index 只支持 5 人；人数变化时刷新一次预览
       state.avalonRoleOrder = null;
-      updateCounter(); // 更新team计数（人数变化时）
+      updateCounter();
       updateTableHeadPreview();
     });
   }
   
-  // Avalon user_agent_id 变化时重新布局圆桌（participate 模式下人类头像位置会改变）
   const avalonUserAgentId = document.getElementById("avalon-user-agent-id");
   if (avalonUserAgentId) {
     avalonUserAgentId.addEventListener("change", function() {
@@ -1376,18 +1383,15 @@ function initEventListeners() {
     });
   }
   
-  // Avalon：重新随机角色分配（仅影响本次启动）
   if (DOM.avalonRerollRolesBtn) {
     DOM.avalonRerollRolesBtn.addEventListener("click", (e) => {
       e.preventDefault();
-      // participate 模式强制禁用（按钮 disabled 但这里也再保护一次）
       if (state.selectedMode === "participate") return;
       state.avalonRoleOrder = avalonAssignRolesFor5();
       updateTableHeadPreview();
     });
   }
 
-  // Diplomacy human_power 变化时重新布局圆桌（participate 模式下人类头像位置会改变）
   const diplomacyHumanPower = document.getElementById("diplomacy-human-power");
   if (diplomacyHumanPower) {
     diplomacyHumanPower.addEventListener("change", function() {
@@ -1396,7 +1400,6 @@ function initEventListeners() {
     });
   }
 
-  // Diplomacy：随机打乱 power_names（仅影响 index 圆桌预览，不影响实际后端开局）
   if (DOM.diplomacyShufflePowersBtn) {
     DOM.diplomacyShufflePowersBtn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -1409,12 +1412,10 @@ function initEventListeners() {
     });
   }
   
-  // 随机选择人物按钮
   if (DOM.randomSelectBtn) {
     DOM.randomSelectBtn.addEventListener("click", (e) => {
       e.preventDefault();
       
-      // 确定需要选择的人数
       const game = state.selectedGame;
       const mode = state.selectedMode;
       const required =
@@ -1432,28 +1433,28 @@ function initEventListeners() {
         return;
       }
       
-      // 清空当前选择
       state.selectedIds.clear();
       state.selectedIdsOrder = [];
       
-      // 获取所有可用的人物ID
+      if (game === "avalon") {
+        state.avalonRoleOrder = null;
+      } else if (game === "diplomacy") {
+        state.diplomacyPowerOrder = null;
+      }
+      
       const allIds = Array.from({ length: CONFIG.portraitCount }, (_, i) => i + 1);
       
-      // 随机打乱并选择前 required 个
       const shuffled = allIds.slice();
       shuffleInPlace(shuffled);
       const selected = shuffled.slice(0, required);
       
-      // 更新选择状态
       selected.forEach(id => {
         state.selectedIds.add(id);
         state.selectedIdsOrder.push(id);
       });
       
-      // 重新渲染人物卡片以更新 active 状态
       renderPortraits();
       
-      // 更新计数器和圆桌布局
       updateCounter();
       layoutTablePlayers();
       updateTableHeadPreview();
@@ -1462,7 +1463,6 @@ function initEventListeners() {
     });
   }
   
-  // 开始游戏按钮
   if (DOM.startBtn) {
     DOM.startBtn.addEventListener("click", async () => {
       const game = state.selectedGame;
@@ -1491,7 +1491,6 @@ function initEventListeners() {
         
         const payload = buildPayload(game, mode);
         
-        // 清除旧的游戏相关缓存数据，避免页面使用过期数据
         const keysToKeep = ['gameConfig', 'selectedPortraits', 'gameLanguage'];
         Object.keys(sessionStorage).forEach(key => {
           if (!keysToKeep.includes(key)) {
@@ -1499,13 +1498,10 @@ function initEventListeners() {
           }
         });
         
-        // 保存配置数据到 sessionStorage
-        // 按游戏中的实际顺序保存头像（与圆桌布局顺序一致）
         const ids = state.selectedIdsOrder.filter(id => state.selectedIds.has(id));
         let selectedPortraitsArray = [];
         
         if (mode === "participate") {
-          // participate 模式：按 user_agent_id 位置重新排列
           let userAgentId = 0;
           let numPlayers = 0;
           
@@ -1513,7 +1509,6 @@ function initEventListeners() {
             userAgentId = payload.user_agent_id || 0;
             numPlayers = payload.num_players || 5;
           } else if (game === "diplomacy") {
-            // Diplomacy: 将 human_power 名称转换为索引
             const humanPower = payload.human_power || "";
             numPlayers = 7;
             if (state.diplomacyOptions && state.diplomacyOptions.powers) {
@@ -1531,7 +1526,6 @@ function initEventListeners() {
             }
           }
         } else {
-          // observe 模式：直接保存
           selectedPortraitsArray = ids;
         }
         
@@ -1540,24 +1534,21 @@ function initEventListeners() {
         sessionStorage.setItem("gameLanguage", payload.language || "en");
         
         setTimeout(() => {
-          // 添加时间戳参数强制浏览器不使用缓存的页面
           const url = computeRedirectUrl(game, mode);
           const timestamp = Date.now();
           const separator = url.includes('?') ? '&' : '?';
           window.location.href = `${url}${separator}_t=${timestamp}`;
         }, CONFIG.travelDuration + 300);
       } catch (e) {
-        alert("启动失败: " + e.message);
+        alert("Failed to start: " + e.message);
         DOM.startBtn.disabled = false;
       }
     });
   }
   
-  // 窗口大小变化时重新布局
   window.addEventListener("resize", () => layoutTablePlayers());
 }
 
-// -------------------- 初始化DOM引用 --------------------
 function initDOM() {
   DOM = {
     strip: document.getElementById("portraits-strip"),
@@ -1581,73 +1572,55 @@ function initDOM() {
   };
 }
 
-// -------------------- 初始化 --------------------
-// 全局变量：跟踪配置更新时间
 let lastConfigUpdateTime = localStorage.getItem(STORAGE_KEYS.CONFIG_UPDATE_TIME) || "0";
 
 async function init() {
-  // 首先初始化DOM引用
   initDOM();
   
-  // 从后端加载 web_config.yaml 配置（角色名字等）- 仅在首次加载时
   await loadWebConfig();
   
-  // 渲染人物（此时会使用更新后的配置）
   renderPortraits();
   updateCounter();
   layoutTablePlayers();
   
-  // 设置默认模式
   setMode("observe");
   updateConfigVisibility();
   updateTableHeadPreview();
   
-  // 初始化事件监听
   initEventListeners();
   
-  // 监听页面焦点变化，当从 character_config 返回时重新加载配置
   let lastFocusTime = Date.now();
   
   window.addEventListener("focus", () => {
-    // 避免频繁刷新（至少间隔 500ms）
     const now = Date.now();
     if (now - lastFocusTime < 500) return;
     lastFocusTime = now;
     
-    // 检查配置是否已更新
     const currentUpdateTime = localStorage.getItem(STORAGE_KEYS.CONFIG_UPDATE_TIME) || "0";
     if (currentUpdateTime !== lastConfigUpdateTime) {
       lastConfigUpdateTime = currentUpdateTime;
-      // 重新渲染角色列表（重新读取 localStorage 中的配置）
       renderPortraits();
     }
   });
   
-  // 监听 storage 事件（跨标签页/窗口的配置变化）
   window.addEventListener("storage", (e) => {
     if (e.key === STORAGE_KEYS.AGENT_CONFIGS) {
-      // localStorage 中的配置已变化，重新渲染
       renderPortraits();
     }
   });
   
-  // 监听自定义事件（同一窗口内的配置变化，由 character_config 页面触发）
   window.addEventListener('localStorageChange', () => {
     renderPortraits();
   });
   
-  // 初始消息
   addStatusMessage("Welcome to Agent Arena!");
   addStatusMessage("Please select Agents and start the game...");
   
-  // 初始化步骤提示hover效果
   initStepHints();
   
-  // 页面加载时让步骤提示闪烁两次提醒用户
   blinkStepHints();
 }
 
-// 初始化步骤提示hover效果
 function initStepHints() {
   const stepHints = document.querySelectorAll(".step-hint");
   stepHints.forEach(hint => {
@@ -1690,20 +1663,17 @@ function initStepHints() {
   });
 }
 
-// 页面加载时让步骤提示闪烁两次提醒用户
 function blinkStepHints() {
   const stepHints = document.querySelectorAll(".step-hint");
   stepHints.forEach(hint => {
     hint.classList.add("initial-blink");
     
-    // 动画结束后移除类，避免重复播放
     hint.addEventListener("animationend", () => {
       hint.classList.remove("initial-blink");
     }, { once: true });
   });
 }
 
-// DOM 加载完成后初始化
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init);
 } else {

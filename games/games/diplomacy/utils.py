@@ -20,7 +20,6 @@ class Colors:
 def add_legend_to_svg(svg_content: str, colors: Dict[str, str]) -> str:
     """
     Add a power color legend to the SVG content.
-    向 SVG 内容添加势力颜色图例。
     """
     try:
         doc = minidom.parseString(svg_content)
@@ -120,7 +119,7 @@ async def save_game_logs(
     game_log_dir: str,
 ) -> None:
     """
-    保存游戏日志，包括 Agent 的记忆和游戏进程日志。
+    Save game logs, including agent memories and game process logs.
     """
     def convert_to_serializable(obj: Any) -> Any:
         """Convert numpy types to Python native types."""
@@ -185,7 +184,7 @@ async def save_game_logs(
         except Exception as e:
             print(f"{Colors.WARNING}Failed to save memory for agent {agent.name}: {e}{Colors.ENDC}")
 
-# 提取消息解析逻辑为独立方法
+# Extract message parsing logic as independent method
 def parse_negotiation_messages(raw: str, power_name: str, power_names: List[str]) -> List[Dict]:
     """Parse negotiation messages from agent response."""
     raw = (raw or "").strip()
@@ -275,26 +274,26 @@ def parse_negotiation_messages(raw: str, power_name: str, power_names: List[str]
 
 def order_to_natural_language(order: str) -> str:
     """
-    将标准的 Diplomacy 指令字符串转换为中文自然语言描述。
+    Convert standard Diplomacy order string to natural language description.
     """
     if ' S ' in order:
         unit, target = order.split(' S ', 1)
-        return f"{unit} 支援 {target}"
+        return f"{unit} support {target}"
     elif ' C ' in order:
         unit, target = order.split(' C ', 1)
-        return f"{unit} 护送 {target}"
+        return f"{unit} convoy {target}"
     elif ' - ' in order:
         unit, dest = order.split(' - ', 1)
-        return f"{unit} 移动到 {dest}"
+        return f"{unit} move to {dest}"
     elif order.endswith(' H'):
-        return f"{order[:-2]} 原地驻守"
+        return f"{order[:-2]} hold"
     elif ' R ' in order:
         unit, dest = order.split(' R ', 1)
-        return f"{unit} 撤退到 {dest}"
+        return f"{unit} retreat to {dest}"
     elif ' D' in order:
-        return f"{order.replace(' D', '')} 解散"
+        return f"{order.replace(' D', '')} disband"
     elif ' B' in order:
-        return f"{order.replace(' B', '')} 募集"
+        return f"{order.replace(' B', '')} build"
     return order
 
 
@@ -308,11 +307,11 @@ from agentscope.message import Msg
 
 def load_prompts(language: str = "en") -> dict:
     """
-    加载prompt文本，支持中英文。
+    Load prompt text, support Chinese and English.
     """
     base_path = os.path.join(os.path.dirname(__file__), "prompt")
     lang = (language or "").lower().strip()
-    # Web 端使用 zh；历史配置里也可能是 zn/cn/chinese 等
+    # Web uses zh; historical configs may also use zn/cn/chinese etc.
     zh_aliases = {"zh", "zn", "cn", "zh-cn", "zh_cn", "chinese"}
     if lang in zh_aliases or (os.getenv("LANGUAGE", "").lower().strip() in zh_aliases):
         prompts_dir = os.path.join(base_path, "prompts_simple_zn")
@@ -329,7 +328,7 @@ def load_prompts(language: str = "en") -> dict:
                 except Exception:
                     prompts[fname] = ''
     else:
-        print(f"[WARNING] 未找到 prompts 目录: {prompts_dir}")
+        print(f"[WARNING] Prompts directory not found: {prompts_dir}")
     return prompts
 
 # -*- coding: utf-8 -*-

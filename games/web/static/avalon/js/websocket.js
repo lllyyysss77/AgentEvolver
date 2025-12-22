@@ -1,7 +1,5 @@
-// WebSocket client for Avalon game
 class WebSocketClient {
     constructor(url = null) {
-        // Auto-detect WebSocket URL based on current page
         if (!url) {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.host;

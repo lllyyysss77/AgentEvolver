@@ -17,16 +17,16 @@ class DiplomacyConfig:
     negotiation_rounds: int = 3
     seed: int = 42
     language: str = "en"
-    human_power: Optional[str] = None  # e.g., "ENGLAND" when participate
-    roles: Optional[dict] = None  # 每个势力的模型配置
+    human_power: Optional[str] = None 
+    roles: Optional[dict] = None 
 
     @classmethod
     def default(cls) -> "DiplomacyConfig":
         """
-        优先从 yaml 读取默认值（如有），否则用硬编码默认值。
-        支持通过环境变量 DIPLOMACY_CONFIG_YAML 指定 yaml 路径。
+        Prioritize reading defaults from yaml (if available), otherwise use hardcoded defaults.
+        Support specifying yaml path via environment variable DIPLOMACY_CONFIG_YAML.
         """
-        # 1. 默认参数
+        # 1. Default parameters
         base = dict(
             power_names=["AUSTRIA", "ENGLAND", "FRANCE", "GERMANY", "ITALY", "RUSSIA", "TURKEY"],
             map_name="standard",
@@ -37,7 +37,7 @@ class DiplomacyConfig:
             human_power=None,
         )
 
-        # 2. 尝试从yaml读取
+        # 2. Try to read from yaml
         yaml_path = os.environ.get("DIPLOMACY_CONFIG_YAML", "games/games/diplomacy/configs/default_config.yaml")
         roles = None
         if os.path.exists(yaml_path):

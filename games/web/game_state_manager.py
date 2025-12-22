@@ -10,11 +10,9 @@ class GameStateManager:
     """Manages game state, message queues, and WebSocket connections."""
     
     def __init__(self):
-        """初始化游戏状态管理器"""
         self.input_queues: Dict[str, queue.Queue] = {}
         self.message_queue: asyncio.Queue = asyncio.Queue()
         self.websocket_connections: Dict[str, Any] = {}
-        # 统一游戏状态（支持 Avalon 和 Diplomacy）
         self.game_state: Dict[str, Any] = {
             "game": None,
             "phase": None,
@@ -22,7 +20,6 @@ class GameStateManager:
             "round_id": None,
             "leader": None,
             "status": "waiting",  # waiting, running, finished, stopped, error
-            # Diplomacy 专用字段
             "round": None,
             "map_svg": None,
             "obs_log_entry": None,
@@ -32,7 +29,7 @@ class GameStateManager:
         self.user_agent_id: Optional[str] = None
         self.should_stop: bool = False
         self.game_thread: Optional[Any] = None
-        self.history: list[Dict[str, Any]] = []  # Diplomacy 历史记录缓冲区
+        self.history: list[Dict[str, Any]] = []
     
     def set_mode(self, mode: str, user_agent_id: Optional[str] = None, game: Optional[str] = None):
         """Set the game mode and game name."""
@@ -44,7 +41,6 @@ class GameStateManager:
         """Stop the current game."""
         self.should_stop = True
         self.update_game_state(status="stopped")
-        # 尝试取消asyncio任务（如果存在）
         if hasattr(self, '_game_task') and self._game_task:
             try:
                 self._game_task.cancel()
@@ -75,7 +71,6 @@ class GameStateManager:
         self.game_thread = thread
     
     async def put_user_input(self, agent_id: str, content: str):
-        """将用户输入放入指定 agent 的队列"""
         if agent_id not in self.input_queues:
             self.input_queues[agent_id] = queue.Queue()
         
@@ -83,7 +78,6 @@ class GameStateManager:
         await loop.run_in_executor(None, self.input_queues[agent_id].put, content)
     
     async def get_user_input(self, agent_id: str, timeout: Optional[float] = None) -> str:
-        """从指定 agent 的队列获取用户输入"""
         if agent_id not in self.input_queues:
             self.input_queues[agent_id] = queue.Queue()
         
@@ -107,7 +101,6 @@ class GameStateManager:
             raise
     
     async def broadcast_message(self, message: Dict[str, Any]):
-        """向所有 WebSocket 连接广播消息"""
         if self.should_stop:
             return
         
@@ -132,9 +125,7 @@ class GameStateManager:
         self.websocket_connections.pop(connection_id, None)
     
     def update_game_state(self, **kwargs):
-        """更新游戏状态，并自动为 Diplomacy 创建历史快照"""
         self.game_state.update(kwargs)
-        # Diplomacy 观战模式：自动保存历史快照
         if self.game_state.get("game") == "diplomacy":
             snapshot_keys = ["phase", "round", "status", "map_svg", "obs_log_entry", "logs", "mission_id", "round_id", "leader"]
             snapshot = {k: self.game_state.get(k) for k in snapshot_keys}
@@ -143,7 +134,6 @@ class GameStateManager:
             self.history.append(snapshot)
     
     def save_history_snapshot(self, kind: str = "state"):
-        """为 Diplomacy 显式保存历史快照"""
         if self.game_state.get("game") != "diplomacy":
             return
         snapshot_keys = ["phase", "round", "status", "map_svg", "obs_log_entry", "logs", "mission_id", "round_id", "leader"]
@@ -157,7 +147,6 @@ class GameStateManager:
         return self.game_state.copy()
     
     def format_message(self, sender: str, content: str, role: str = "assistant") -> Dict[str, Any]:
-        """格式化消息用于 WebSocket 传输"""
         return {
             "type": "message",
             "sender": sender,
@@ -167,14 +156,12 @@ class GameStateManager:
         }
     
     def format_game_state(self) -> Dict[str, Any]:
-        """格式化游戏状态用于 WebSocket 传输"""
         return {
             "type": "game_state",
             **self.game_state,
         }
     
     def format_user_input_request(self, agent_id: str, prompt: str) -> Dict[str, Any]:
-        """格式化用户输入请求用于 WebSocket 传输"""
         return {
             "type": "user_input_request",
             "agent_id": agent_id,

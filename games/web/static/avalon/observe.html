@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Avalon Game - Observe Mode</title>
     <link rel="stylesheet" href="/static/avalon/css/style.css?v=20251214">
-    <!-- 早期初始化脚本：在页面渲染之前设置正确的显示状态和预加载数据 -->
     <script>
         window.__EARLY_INIT__ = { hasGameConfig: false, isGameRunning: false, config: null, portraits: null };
         (function() {
@@ -34,7 +33,7 @@
         })();
     </script>
     <style>
-        /* 根据初始状态隐藏/显示元素，避免闪烁 */
+        /* Hide/show elements based on initial state to avoid flickering */
         html.auto-start #game-setup { display: none !important; }
         html.auto-start #messages-container { display: flex !important; }
         html.manual-start #game-setup { display: block !important; }

@@ -14,7 +14,7 @@ from agentscope.message import Msg
 from agentscope.agent import AgentBase
 from agentscope.memory import InMemoryMemory
 
-# 引入重构后的工具函数
+# Import refactored utility functions
 from .utils import Colors, add_legend_to_svg, save_game_logs, order_to_natural_language, load_prompts, parse_negotiation_messages
 from .engine import DiplomacyConfig
 
@@ -53,7 +53,7 @@ class DiplomacyGame:
         self.game_id = game_id
         
         # Initialize Game
-        self._debug_print(f"{Colors.HEADER}=== 初始化 Diplomacy (Map: {self.config.map_name}, Seed: {self.config.seed}) ==={Colors.ENDC}")
+        self._debug_print(f"{Colors.HEADER}=== Initialize Diplomacy (Map: {self.config.map_name}, Seed: {self.config.seed}) ==={Colors.ENDC}")
         self.game = Game(map_name=self.config.map_name, seed=self.config.seed)
         
         # Initialize Logging
@@ -75,8 +75,8 @@ class DiplomacyGame:
 
     def _assign_agents(self):
         """Assign powers to agents."""
-        # 使用config.power_names来保持与前端传入的顺序一致
-        # 如果config中没有指定，则使用game.powers.keys()的默认顺序
+        # Use config.power_names to maintain order consistent with frontend
+        # If not specified in config, use default order from game.powers.keys()
         power_names = self.config.power_names if self.config.power_names else list(self.game.powers.keys())
         for i, power_name in enumerate(power_names):
             if hasattr(self.agents[i], 'model') and self.agents[i].model is not None:
@@ -88,7 +88,7 @@ class DiplomacyGame:
                 self.agents[i].power_name = power_name 
                 self.power_agent_map[power_name] = self.agents[i]
             else:
-                self._debug_print(f"  {power_name} 没有分配 Agent (将随机行动)")
+                self._debug_print(f"  {power_name} has no Agent assigned (will act randomly)")
     
     # Helper function for debug printing
     def _debug_print(self, *args, **kwargs):
@@ -208,7 +208,7 @@ class DiplomacyGame:
                 break
 
             current_phase = self.game.get_current_phase()
-            self._debug_print(f"\n{Colors.BOLD}{Colors.OKCYAN}--- 当前阶段: {current_phase} (第 {phases_processed + 1} 轮) ---{Colors.ENDC}")
+            self._debug_print(f"\n{Colors.BOLD}{Colors.OKCYAN}--- Current Phase: {current_phase} (Round {phases_processed + 1}) ---{Colors.ENDC}")
 
             await self._broadcast(f"--- Phase: {current_phase} (Round {phases_processed + 1}) ---")
 
@@ -243,34 +243,34 @@ class DiplomacyGame:
 
             sc_counts = {p: len(power.centers) for p, power in self.game.powers.items() if not power.is_eliminated()}
             phase_log["sc_counts"] = sc_counts
-            self._debug_print(f"{Colors.HEADER}各方补给中心: {sc_counts}{Colors.ENDC}")
+            self._debug_print(f"{Colors.HEADER}Supply Centers: {sc_counts}{Colors.ENDC}")
 
             await self._render_map(f"result_{current_phase}")
             if self.state_manager:
                 self.state_manager.save_history_snapshot(kind="result")
 
-            # 实时写入日志
+            # Write logs in real-time
             if self.game_log_dir:
                 await save_game_logs(self.agents, self.game, self.game_log, self.game_log_dir)
 
-        self._debug_print(f"\n{Colors.HEADER}=== 游戏结束 ==={Colors.ENDC}")
-        self._debug_print(f"{Colors.HEADER}结果: {self.game.outcome}{Colors.ENDC}")
+        self._debug_print(f"\n{Colors.HEADER}=== Game Over ==={Colors.ENDC}")
+        self._debug_print(f"{Colors.HEADER}Result: {self.game.outcome}{Colors.ENDC}")
 
         await self._broadcast(f"Game Over. Outcome: {self.game.outcome}")
 
         if self.state_manager:
             self.state_manager.update_game_state(status="finished")
 
-        # 游戏结束后再写一次日志，确保最终状态
+        # Write logs once more after game ends to ensure final state
         if self.game_log_dir:
             await save_game_logs(self.agents, self.game, self.game_log, self.game_log_dir)
 
         return self.game
 
     async def _handle_negotiation_phase(self, current_phase, round_num, phase_log):
-        self._debug_print(f"{Colors.OKBLUE}--- 开始谈判阶段 ({self.config.negotiation_rounds} 轮) ---{Colors.ENDC}")
+        self._debug_print(f"{Colors.OKBLUE}--- Start Negotiation Phase ({self.config.negotiation_rounds} rounds) ---{Colors.ENDC}")
         for round_idx in range(self.config.negotiation_rounds):
-            self._debug_print(f"{Colors.OKBLUE}  第{round_idx + 1}轮谈判{Colors.ENDC}")
+            self._debug_print(f"{Colors.OKBLUE}  Round {round_idx + 1} Negotiation{Colors.ENDC}")
             
             round_negotiation_log = {"round_idx": round_idx + 1, "messages": []}
             round_messages = [] 
@@ -332,7 +332,7 @@ class DiplomacyGame:
                     self._debug_print(f"{Colors.OKGREEN}{log_msg}{Colors.ENDC}")
                     
                     # Broadcast to observer
-                    await self._broadcast(f"{log_msg}", sender=sender) #给obs看
+                    await self._broadcast(f"{log_msg}", sender=sender)
 
             phase_log["negotiation"].append(round_negotiation_log)
 
@@ -364,7 +364,7 @@ class DiplomacyGame:
                     await agent.observe(Msg(name=sender, content=msg_text, role="assistant"))
 
     async def _handle_order_phase(self, current_phase, phase_log):
-        self._debug_print(f"{Colors.OKBLUE}--- 开始书写命令 ---{Colors.ENDC}")
+        self._debug_print(f"{Colors.OKBLUE}--- Start Writing Orders ---{Colors.ENDC}")
         possible_orders = self.game.get_all_possible_orders()
         
         async def process_agent_orders(power_name, power, agent):
@@ -439,7 +439,7 @@ class DiplomacyGame:
             if isinstance(result, Exception):
                 continue
             if not isinstance(result, tuple) or len(result) != 3:
-                continue  # 跳过格式不正确的结果
+                continue  # Skip incorrectly formatted results
             
             power_name, submitted_orders, translated_orders = result
             if submitted_orders:
