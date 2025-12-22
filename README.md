@@ -11,6 +11,7 @@
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-black" alt="License"></a>
   <a href="https://modelscope.github.io/AgentEvolver/"><img src="https://img.shields.io/badge/docs-online-blue?logo=markdown" alt="Documentation"></a>
   <a href="https://arxiv.org/abs/2511.10395"><img src="https://img.shields.io/badge/arXiv-2511.10395-b31b1b.svg" alt="arXiv"></a>
+  <a href="https://deepwiki.com/modelscope/AgentEvolver"><img src="https://deepwiki.com/badge.svg" alt="deepwiki"></a>
   <a href="https://github.com/modelscope/AgentEvolver"><img src="https://img.shields.io/github/stars/modelscope/AgentEvolver?style=social" alt="GitHub Stars"></a>
 </p>
 
@@ -26,7 +27,8 @@ improve their capabilities, aiming for efficient, cost-effective, and continuous
 ## 📰 News
 
 - **[2025-12]** 🎮 [AgentEvolver Game Arena](games/README.md) released — a multi-agent social reasoning arena for interaction, evaluation, and training in games like Avalon and Diplomacy.
-- **[2025-11]** 📄 [The AgentEvolver Technical Report is now available](https://arxiv.org/abs/2511.10395), detailing the framework’s architecture, methodology, and key findings.
+- **[2025-12]** 📢 New preprint [CuES](https://www.arxiv.org/abs/2512.01311) on an extended self-questioning method released with [code](research/CuES/README.md).
+- **[2025-11]** 📄 [The AgentEvolver Technical Report is now available](https://arxiv.org/abs/2511.10395), detailing the framework's architecture, methodology, and key findings.
 - **[2025-11]** 🧩 AgentEvolver v1 has been released now!
 
 
@@ -212,3 +214,8 @@ If you find this work useful, please consider citing:
   url           = {https://arxiv.org/abs/2511.10395}
 }
 ```
+
+
+## ✨ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=modelscope/AgentEvolver&type=date&legend=top-left)](https://www.star-history.com/#modelscope/AgentEvolver&type=date&legend=top-left)

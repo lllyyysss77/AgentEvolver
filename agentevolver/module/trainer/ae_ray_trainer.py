@@ -360,7 +360,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
         self.ref_in_actor = config.actor_rollout_ref.model.get("lora_rank", 0) > 0
 
         # define in-reward KL control
-        # kl loss control currently not suppoorted
+        # kl loss control currently not supported
         if config.algorithm.use_kl_in_reward:
             self.kl_ctrl_in_reward = core_algos.get_kl_controller(config.algorithm.kl_ctrl)
 
@@ -549,7 +549,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             self.train_task_manager._reward_config,
             self.config.task_manager.train_data_path,
             tokenizer=self.tokenizer,
-            config=self.config,
+            config=self.config.data,
             processor=self.processor,
         )
         self.val_dataset = FullDataset(
@@ -558,7 +558,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             self.val_task_manager._reward_config,
             cache_path=None,
             tokenizer=self.tokenizer,
-            config=self.config,
+            config=self.config.data,
             processor=self.processor,
         )
 
@@ -1173,7 +1173,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                     batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object)  # ⭐ Generate unique UIDs for each item in the batch
 
                     # in the new code, the rollout process generates new extras, which should be merged with the original extra.
-                    # by now, they are stored seperately.
+                    # by now, they are stored separately.
                     # assert len(gen_batch_output.non_tensor_batch["extras"].keys()&batch_extras.keys())==0, "extra of extra should not overlap with existing extra...how funny..."
                     batch.non_tensor_batch['original_extras']=batch_extras  # ⭐ Store original extras before scaling
                     batch = union_gen_batch_via_task_id(tasks, batch, gen_batch_output)  # ⭐ Merge generated batch with the current batch

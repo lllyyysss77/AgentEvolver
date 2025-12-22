@@ -76,7 +76,7 @@ class AgentFlow(BaseAgentFlow):
                 init_messages=init_messages,
                 traj_exp_config=traj_exp_config
                 )
-        self.cmt.metadata["task_train_mode"] = traj_exp_config.train_mode
+        self.cmt.metadata["task_train_exp_mode"] = traj_exp_config.train_mode
         self.cmt.metadata["add_exp"] = traj_exp_config.add_exp
         self.cmt.metadata["experience_list"] = traj_exp_config.experience_list
         # init_messages, metadata = self.add_experience(init_messages, task_id, data_id, rollout_id, query, add_exp)  # ⭐ Initialize messages and metadata
