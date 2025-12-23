@@ -49,5 +49,5 @@ default_role:
     kwargs:
       memory:
         type: SlidingWindowMemory
-        kwargs: {}
+        kwargs: null
 
