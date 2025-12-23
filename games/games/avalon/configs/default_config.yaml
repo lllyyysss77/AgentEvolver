@@ -16,7 +16,7 @@ default_role:
     stream: false
   agent:
     type: ThinkingReActAgent
-    kwargs: {}
+    kwargs: null
 
 # Default game configuration
 game:

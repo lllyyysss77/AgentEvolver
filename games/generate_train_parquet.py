@@ -54,16 +54,17 @@ def generate_train_tasks_parquet(
         task_id_prefix = f"{env_type}_train"
     
     # Extract game configuration for metadata
-    # For avalon: roles with trainable flag
-    # For diplomacy: models with trainable flag
+    # Structure should match what's expected by the training pipeline
     game_config = {
-        'default_model': base_config.get('default_model', {}),
         'game': base_config.get('game', {}),
     }
     
-    # Handle role/model configuration based on game type
+    # Extract default_role configuration (used as default for all roles)
+    if 'default_role' in base_config:
+        game_config['default_role'] = base_config.get('default_role', {})
+    
+    # Extract roles with trainable flag (Avalon-style configuration)
     if 'roles' in base_config:
-        # Avalon-style: roles configuration
         roles_config = {}
         for role_name, role_cfg in base_config.get('roles', {}).items():
             if isinstance(role_cfg, dict) and role_cfg.get('trainable', False):

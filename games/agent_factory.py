@@ -162,7 +162,7 @@ def create_memory_from_config(
         return InMemoryMemory()
     
     memory_type = memory_config.get('type', 'InMemoryMemory')
-    memory_kwargs = memory_config.get('kwargs', {})
+    memory_kwargs = memory_config.get('kwargs') or {}
     
     # Try to import from agentscope.memory first
     try:
@@ -250,7 +250,7 @@ def create_formatter_from_config(
         formatter_kwargs = {}
     elif isinstance(formatter_config, dict):
         formatter_type = formatter_config.get('type', 'SecureMultiAgentFormatter')
-        formatter_kwargs = formatter_config.get('kwargs', {}).copy()
+        formatter_kwargs = (formatter_config.get('kwargs') or {}).copy()
     else:
         # If formatter_config is not a dict, use defaults
         formatter_type = 'SecureMultiAgentFormatter'
@@ -380,7 +380,7 @@ def create_agent_from_config(
     if 'type' not in agent_config:
         raise ValueError("agent_config must contain 'type' field")
     
-    if 'kwargs' not in agent_config:
+    if 'kwargs' not in agent_config or agent_config['kwargs'] is None:
         agent_config['kwargs'] = {}
     
     # Load agent class
