@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Unified web server for Avalon + Diplomacy."""
 import asyncio
+import copy
 import json
 import uuid
 from typing import Optional, Dict, Any
@@ -284,27 +285,32 @@ async def get_options(game: str | None = None):
             web_cfg = load_config(web_config_path)
             
             if isinstance(web_cfg, dict):
-                result["portraits"] = web_cfg.get('portraits', {})
+                portraits_cfg = web_cfg.get('portraits', {}) or {}
+                sanitized_portraits = {}
+                for pid, pdata in portraits_cfg.items():
+                    if not isinstance(pdata, dict):
+                        continue
+                    portrait_copy = copy.deepcopy(pdata)
+                    model_cfg = portrait_copy.get("model")
+                    if isinstance(model_cfg, dict):
+                        model_cfg["api_key"] = ""
+                    sanitized_portraits[pid] = portrait_copy
+                result["portraits"] = sanitized_portraits
+
                 default_role = web_cfg.get("default_role", {})
-                
                 default_model = {}
                 if isinstance(default_role, dict):
-                    model_cfg = default_role.get("model", {})
-                    agent_cfg = default_role.get("agent", {})
+                    model_cfg = default_role.get("model", {}) or {}
+                    agent_cfg = default_role.get("agent", {}) or {}
                     
                     default_model["model_name"] = model_cfg.get("model_name", "")
-                    default_model["api_base"] = model_cfg.get("url", "") or model_cfg.get("api_base", "")
-                    default_model["api_key"] = model_cfg.get("api_key", "")
+                    default_model["api_base"] = model_cfg.get("url", "") or model_cfg.get("api_base", "") or os.getenv("OPENAI_BASE_URL", "")
+                    default_model["api_key"] = ""
                     default_model["temperature"] = model_cfg.get("temperature", 0.7)
                     default_model["max_tokens"] = model_cfg.get("max_tokens", 2048)
                     
                     if agent_cfg:
                         default_model["agent_class"] = agent_cfg.get("type", "")
-                    
-                    if not default_model.get("api_key"):
-                        default_model["api_key"] = os.getenv("OPENAI_API_KEY", "")
-                    if not default_model.get("api_base"):
-                        default_model["api_base"] = os.getenv("OPENAI_BASE_URL", "")
                 
                 result["default_model"] = default_model
         return result
@@ -404,9 +410,11 @@ async def get_leaderboard(game: str):
         
         # Sort models by Elo (using models list from config for ordering)
         model_stats = leaderboard_data.get('models', {})
-        sorted_models = sorted(models,
-                              key=lambda m: model_stats.get(m, {}).get('elo', 0),
-                              reverse=True)
+        config_models = models if isinstance(models, list) else []
+        all_models = list(dict.fromkeys(config_models + list(model_stats.keys())))
+        sorted_models = sorted(all_models,
+                      key=lambda m: model_stats.get(m, {}).get('elo', 0),
+                      reverse=True)
         
         # Format response with model names included
         formatted_models = []
